@@ -16,6 +16,45 @@ import fitsio
 
 import copy
 
+def get_redshift_bins(galaxy_type):
+    if(galaxy_type == "LRG"):
+        return np.array([0.4,0.6,0.8,1.1])
+    elif(galaxy_type=="BGS_BRIGHT"):
+        return np.array([0.1,0.2,0.3,0.4])
+    else:
+        raise ValueError("Invalid value of galaxy_type in get_redshift_bins. Allowed: [BGS_BRIGHT,LRG]. Here: {}".format(galaxy_type))
+
+def get_magnitude_cuts(galaxy_type):
+    if(galaxy_type in ["LRG","ELG"]):
+        return None
+    elif(galaxy_type=="BGS_BRIGHT"):
+        return -1.*np.array([19.5,20.5,21.0])
+    else:
+        raise ValueError("Invalid value of galaxy_type in get_magnitude_cuts. Allowed: [BGS_BRIGHT,LRG]. Here: {}".format(galaxy_type))
+
+def create_redshift_mask(reference_redshifts,z_bins_lens):
+    if z_bins_lens is None:
+        return np.ones(len(reference_redshifts),dtype=bool)
+    else:
+        redshift_mask = ((reference_redshifts >= z_bins_lens[0]) & (reference_redshifts < z_bins_lens[-1]))
+        return redshift_mask
+
+
+def get_magnitude_mask(data_table,magnitude_cuts,lens_bins,mag_col="ABSMAG_RP0",zcol="Z"):
+    if magnitude_cuts is None:
+        return np.ones(len(data_table),dtype=bool)
+    redshift_mask = create_redshift_mask(data_table[zcol],lens_bins)
+    lens_zbins = (np.digitize(data_table[zcol],lens_bins)-1).astype(int)
+    mask_magnitudes = np.zeros(len(data_table),dtype=bool)
+    mask_magnitudes[redshift_mask] = (data_table[mag_col][redshift_mask] < magnitude_cuts[lens_zbins[redshift_mask]])
+    return mask_magnitudes
+
+def apply_magnitude_cuts(data_table,galaxy_type):
+    magnitude_cuts = get_magnitude_cuts(galaxy_type)
+    lens_bins = get_redshift_bins(galaxy_type)
+    mask_magnitudes = get_magnitude_mask(data_table,magnitude_cuts,lens_bins)
+    return mask_magnitudes
+
 def load_survey_data(galaxy_type,config,zmin=None,zmax=None,debug=True):
     fpath_lss = config['general']['full_lss_path']
     fpath_gal = config['general']['lensing_path']
@@ -27,7 +66,10 @@ def load_survey_data(galaxy_type,config,zmin=None,zmax=None,debug=True):
     lss_tab = Table(fitsio.read(fpath_lss+os.sep+version+os.sep+f"{galaxy_type}_full_HPmapcut.dat.fits",columns=required_columns))
     
     # load our catalogue that contains the clean sample
-    gal_tab = Table(fitsio.read(fpath_gal+os.sep+version+os.sep+f"{galaxy_type}_full.dat.fits",columns=["TARGETID","Z"]))
+    load_columns = ["TARGETID","Z"]
+    if galaxy_type == "BGS_BRIGHT":
+        load_columns += ["ABSMAG_RP0"]
+    gal_tab = Table(fitsio.read(fpath_gal+os.sep+version+os.sep+f"{galaxy_type}_full.dat.fits",columns=load_columns))
 
     if(debug):
         # Extract TARGETID columns
@@ -52,13 +94,14 @@ def load_survey_data(galaxy_type,config,zmin=None,zmax=None,debug=True):
     if zmax is not None:
         mask_zbins &= (full_tab['Z'] < zmax)
     full_tab = full_tab[mask_zbins]
-
+    
     # apply the photometric cuts (it is necessary since a few galaxies do not pass the initial photo-z cuts)
     # I am not sure why that is. It is only ~10 galaxies though, so the error should be irrelevant
     selection_mask = apply_photocuts_DESI(full_tab,galaxy_type)
+    magnitude_mask = apply_magnitude_cuts(full_tab,galaxy_type)
 
-    print(f"Loaded {len(full_tab)} {galaxy_type} galaxies, {len(full_tab)-np.sum(selection_mask)} did not pass the photometric cuts")
-    return full_tab[selection_mask]
+    print(f"Loaded {len(full_tab)} {galaxy_type} galaxies, {len(full_tab)-np.sum(selection_mask & magnitude_mask)} did not pass the photometric cuts")
+    return full_tab[selection_mask & magnitude_mask]
 
 def apply_photocuts_DESI(data, galaxy_type):
     if galaxy_type == "LRG":
@@ -74,7 +117,8 @@ def apply_photocuts_DESI(data, galaxy_type):
     selection_mask = np.zeros(len(data),dtype=bool)
     selection_mask[mask_north] = photoz_selection_north
     selection_mask[~mask_north] = photoz_selection_south
-    return selection_mask
+    magnitude_mask = apply_magnitude_cuts(data,galaxy_type)
+    return (selection_mask & magnitude_mask)
 
 
 def apply_lensing(data,  kappa,  galaxy_type, verbose=False ):
