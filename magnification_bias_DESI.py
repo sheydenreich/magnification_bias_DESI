@@ -146,7 +146,7 @@ def get_alpha(Boolean_change_left, Boolean_change_right, kappa, weights=None):
 
 
 #calculate alpha from a single step size
-def calculate_alpha_simple_surveyX(data, kappa, lensing_func =apply_lensing , weights_str="baseline", use_exp_profile=False): 
+def calculate_alpha_simple_DESI(data, kappa, galaxy_type, lensing_func =apply_lensing , weights_str="none"): 
     import magnification_bias_SDSS
     """Function to calculate the simple estimate for alpha for survey X
 
@@ -156,7 +156,6 @@ def calculate_alpha_simple_surveyX(data, kappa, lensing_func =apply_lensing , we
         lensing_func (func, optional): Function to apply lensing to the data. Defaults to apply_lensing_v3.
         show_each_condition (bool, optional): Print out more details. Defaults to True.
         weights_str (str, optional): Weights for each galaxy. Defaults to "baseline".
-        use_exp_profile (bool, optional): Switch to using the exponential profile. Defaults to False.
 
     Returns:
         float: simple alpha estimate
@@ -164,25 +163,26 @@ def calculate_alpha_simple_surveyX(data, kappa, lensing_func =apply_lensing , we
     """
     
     #assuming kappa positive
-    weights = get_weights(weights_str, data)
+    weights = get_weights(weights_str, data, galaxy_type)
     #postivite kappa: increase #gal at faint end. 
     #convention: left-sided derivative on the faint end. So need minus sign
-    data = lensing_func(data,  kappa, use_exp_profile=use_exp_profile)
+    data_mag = lensing_func(data,  kappa, galaxy_type)
+
     #TODO: fill in how to get the magnitudes from your data. E.g. magnitudes_X = data["magnitudes_X_mag"] . They need to be the magnified magnitudes!
-    combined_left = reapply_photocuts_surveyX(TODO)
+    combined_left = apply_photocuts_DESI(data_mag, galaxy_type)
     
     #other side
-    data = lensing_func(data,  -1.*kappa, use_exp_profile=use_exp_profile)
-    combined_right = reapply_photocuts_surveyX(TODO)
+    data_mag = lensing_func(data,  -1.*kappa)
+    combined_right = apply_photocuts_DESI(data_mag, galaxy_type)
     
-    alpha, alpha_error = magnification_bias_SDSS.get_alpha(combined_left, combined_right, kappa, weights=weights)
+    alpha, alpha_error = get_alpha(combined_left, combined_right, kappa, weights=weights)
     print("-------")
-    print("Overall alpha without R= {}".format(alpha))
+    print("Overall alpha = {}".format(alpha))
 
-    R = magnification_bias_SDSS.get_R(data, use_exp_profile=use_exp_profile, case = "CMASS")
-    print("R = {} (not added)".format(R))
+    #redshift failurs currently not considered
+    # R = magnification_bias_SDSS.get_R(data, use_exp_profile=use_exp_profile, case = "CMASS")
+    # print("R = {} (not added)".format(R))
 
-    
     return alpha, alpha_error
 
 #calculate alpha from multiple step sizes
