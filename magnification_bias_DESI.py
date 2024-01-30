@@ -159,16 +159,29 @@ def apply_lensing(data,  kappa,  galaxy_type, verbose=False ):
     #e.g. a radius 
 
     if(galaxy_type == "LRG"):
-        columns_to_magnify_fiber = [ 'FIBERFLUX_Z', 'FIBERTOTFLUX_Z']
+        fiber_column = "FIBERFLUX_Z"
+        fiber_tot_column = "FIBERTOTFLUX_Z"
     elif(galaxy_type == "BGS_BRIGHT"):
-        columns_to_magnify_fiber =  ['FIBERFLUX_R', 'FIBERTOTFLUX_R']
+        fiber_column = "FIBERFLUX_R"
+        fiber_tot_column = "FIBERTOTFLUX_R"
     else:
         raise ValueError(f"galaxy_type {galaxy_type} not recognized")
     
-    #for now ignore the nuiance and just magnify them as if the full light is captured
-    for column_to_magnify in columns_to_magnify_fiber:
-        data_mag[column_to_magnify] *= (1.+2.*kappa)
+    #only magnifying the galaxy not the surrounding light considered for FIBERTOTFLUX
+    diff_fibertot_fiber = data_mag[fiber_tot_column] - data_mag[fiber_column]
 
+
+    #fiber correction
+    theta_e_galaxies = data_mag["SHAPE_R"] # half light radius in arcsec ## SDSS: data_local['R_DEV'] *  0.396 #convert pixel to arcsec
+    theta_e_arr = np.arange(0.05, 10, 0.01)
+    cor_for_2fiber_mag_arr = [get_cor_for_2fiber_mag(theta_e=i, use_exp_profile=False) for i in theta_e_arr]
+    fiber_correction = np.interp(theta_e_galaxies, theta_e_arr, cor_for_2fiber_mag_arr)
+    #SDSS: data_local["fiber2Flux_mag"] = data_local["FIBER2FLUX"] * (1. +(2.- fiber_correction)*kappa)
+    
+    data_mag[fiber_column] *= (1. +(2.- fiber_correction)*kappa)
+
+
+    data_mag[fiber_tot_column] =  diff_fibertot_fiber + data_mag[fiber_column]
 
     #If your survey only uses magnitudes that capture the full light of the galaxies, psf magnitudes and aperture magnitudes you can copy the method apply_lensing_v3 provided in magnification_bias_SDSS.py and just change the labels of the magnitudes used in your survey.
     #note has to work for negative kappa too!
