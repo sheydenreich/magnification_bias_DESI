@@ -14,6 +14,8 @@ from astropy.table import Table,join
 import os
 import fitsio
 
+import copy
+
 def load_survey_data(galaxy_type,config,zmin=None,zmax=None,debug=True):
     fpath_lss = config['general']['full_lss_path']
     fpath_gal = config['general']['lensing_path']
@@ -75,37 +77,100 @@ def apply_photocuts_DESI(data, galaxy_type):
     return selection_mask
 
 
-def apply_lensing(data_local,  kappa, plots=False, plot_output_filename="test.pdf", verbose=False, use_exp_profile=False):
+def apply_lensing(data,  kappa,  galaxy_type, verbose=False ):
     """Apply a small amount of lensing kappa to the observed magnitudes of the galaxy data. Combines all the functions to correctly apply the lensing for each type of magnitude in SDSS BOSS.
 
     Args:
         data_local : galaxy data
         kappa (float): lensing kappa
-        plots (bool, optional): Whether to plot out the kappa multipliers. Defaults to False.
-        plot_output_filename (str, optional): Filename for the kappa multiplier plot. Defaults to "test.pdf".
-        verbose (bool, optional): Print out details. Defaults to False.
-        use_exp_profile (bool, optional): Switch to using exponential intensity profile. Defaults to False.
+        galaxy_type: which galaxy sample
 
     Returns:
-        data_local: galaxy data with extra columns for lensed magnitudes named ..._mag
+        data: copy of galaxy data with extra columns for lensed magnitudes named ..._mag
     """
+    #TODO test if this works for the data_mag object. Want to copy it instead of overwriting the values
+    #having seperate columns for the magnified fluxes would be more memory efficient but that would requires significant
+    #changes in istarget.py
+    data_mag = copy.deepcopy(data_mag)
+
+    #note FLUX_IVAR_* are all only compared to >0. That can't be affected by lensing therefore can ignore
+    # 'FLUX_IVAR_G', 'FLUX_IVAR_R', 'FLUX_IVAR_Z', 'FLUX_IVAR_W1'
+    
+    
+    #for both LRG and BGS_BRIGHT need 'FLUX_G', 'FLUX_R', 'FLUX_Z', 'FLUX_W1'
+    #note: want to apply lensing after dereddening but for flux deredenning is multiplicative just like lensing so they are interchangable.
+    columns_to_magnify = ['FLUX_G', 'FLUX_R', 'FLUX_Z', 'FLUX_W1']
+    data_mag[columns_to_magnify] *= (1.+2.*kappa)
+
+
+    #the additional Fiber fluxes are more nuianced. Need size information for the galaxies to get an accurate estiamte,
+    #e.g. a radius 
+
+    if(galaxy_type == "LRG"):
+        columns_to_magnify_fiber = [ 'FIBERFLUX_Z', 'FIBERTOTFLUX_Z']
+    elif(galaxy_type == "BGS_BRIGHT"):
+        columns_to_magnify_fiber =  ['FIBERFLUX_R', 'FIBERTOTFLUX_R']
+    else:
+        raise ValueError(f"galaxy_type {galaxy_type} not recognized")
+    
+    #for now ignore the nuiance and just magnify them as if the full light is captured
+    data_mag[columns_to_magnify_fiber] *= (1.+2.*kappa)
+
+
     #If your survey only uses magnitudes that capture the full light of the galaxies, psf magnitudes and aperture magnitudes you can copy the method apply_lensing_v3 provided in magnification_bias_SDSS.py and just change the labels of the magnitudes used in your survey.
     #note has to work for negative kappa too!
-    return None
+    return data_mag
 
 
-def reapply_photocuts_surveyX(magnitudes_X, magnitudes_Y):
-    #implement the full photometric selection of your survey and return a boolean array for which galaxies pass the selection
-    return None
-
-def get_weights(weights_str, data):
+def get_weights(weights_str, data, galaxy_type):
     #implement the weights used for your galaxy survey. We used a string to switch between options but you can of course change that convention
     weights = None 
     return weights
 
 
+#helper functions for alpha calculation
+def get_alpha(Boolean_change_left, Boolean_change_right, kappa, weights=None):
+    """Function to calculate alpha given how many objects fall out of the selection when applying an amount of lensing kappa and -kappa
+
+    Args:
+        Boolean_change_left (_type_): Bool array of objects falling out of selection when applying lensing kappa 
+        Boolean_change_right (_type_): Bool array of objects falling out of selection when applying lensing -kappa 
+        kappa (float): amount of lensing kappa applied
+        weights (float array, optional): Weights for each galaxy. Defaults to None.
+
+    Returns:
+        float: alpha simple estimate
+        float: Poisson uncertainty for alpha
+
+    """
+    
+    if(weights is None):
+        N = len(Boolean_change_left)
+        N_change_left = np.sum(Boolean_change_left) - N
+        N_change_right = np.sum(Boolean_change_right) - N
+    else:
+        #accounting for weights
+        N = np.sum(weights)
+        N_change_left = np.sum(weights[Boolean_change_left]) - N
+        N_change_right = np.sum(weights[Boolean_change_right]) - N
+    
+    #note the minus sign
+    alpha = (N_change_left - N_change_right )/N * 1. /(2.*kappa)
+    #shot noise (incorrect)
+    alpha_error = np.sqrt(np.abs(N_change_left)+np.abs(N_change_right))/N * 1./(2.*kappa) #shot noise error
+    
+    #this neglects contribution from N0 ! only very minor difference
+    error_from_N0 = alpha/np.sqrt(N)
+    alpha_error_full = np.sqrt(alpha_error**2 + error_from_N0**2)
+    print("base error: {}".format(alpha_error))
+    print("N0 error: {}".format(error_from_N0))
+    print("combined error: {}".format(alpha_error_full))
+
+    return alpha, alpha_error
+
+
 #calculate alpha from a single step size
-def calculate_alpha_simple_surveyX(data, kappa, lensing_func =apply_lensing , weights_str="baseline", use_exp_profile=False): 
+def calculate_alpha_simple_DESI(data, kappa, galaxy_type, lensing_func =apply_lensing , weights_str="none"): 
     import magnification_bias_SDSS
     """Function to calculate the simple estimate for alpha for survey X
 
@@ -115,7 +180,6 @@ def calculate_alpha_simple_surveyX(data, kappa, lensing_func =apply_lensing , we
         lensing_func (func, optional): Function to apply lensing to the data. Defaults to apply_lensing_v3.
         show_each_condition (bool, optional): Print out more details. Defaults to True.
         weights_str (str, optional): Weights for each galaxy. Defaults to "baseline".
-        use_exp_profile (bool, optional): Switch to using the exponential profile. Defaults to False.
 
     Returns:
         float: simple alpha estimate
@@ -123,25 +187,25 @@ def calculate_alpha_simple_surveyX(data, kappa, lensing_func =apply_lensing , we
     """
     
     #assuming kappa positive
-    weights = get_weights(weights_str, data)
+    weights = get_weights(weights_str, data, galaxy_type)
     #postivite kappa: increase #gal at faint end. 
     #convention: left-sided derivative on the faint end. So need minus sign
-    data = lensing_func(data,  kappa, use_exp_profile=use_exp_profile)
-    #TODO: fill in how to get the magnitudes from your data. E.g. magnitudes_X = data["magnitudes_X_mag"] . They need to be the magnified magnitudes!
-    combined_left = reapply_photocuts_surveyX(TODO)
+    data_mag = lensing_func(data,  kappa, galaxy_type)
+
+    combined_left = apply_photocuts_DESI(data_mag, galaxy_type)
     
     #other side
-    data = lensing_func(data,  -1.*kappa, use_exp_profile=use_exp_profile)
-    combined_right = reapply_photocuts_surveyX(TODO)
+    data_mag = lensing_func(data,  -1.*kappa)
+    combined_right = apply_photocuts_DESI(data_mag, galaxy_type)
     
-    alpha, alpha_error = magnification_bias_SDSS.get_alpha(combined_left, combined_right, kappa, weights=weights)
+    alpha, alpha_error = get_alpha(combined_left, combined_right, kappa, weights=weights)
     print("-------")
-    print("Overall alpha without R= {}".format(alpha))
+    print("Overall alpha = {}".format(alpha))
 
-    R = magnification_bias_SDSS.get_R(data, use_exp_profile=use_exp_profile, case = "CMASS")
-    print("R = {} (not added)".format(R))
+    #redshift failurs currently not considered
+    # R = magnification_bias_SDSS.get_R(data, use_exp_profile=use_exp_profile, case = "CMASS")
+    # print("R = {} (not added)".format(R))
 
-    
     return alpha, alpha_error
 
 #calculate alpha from multiple step sizes
