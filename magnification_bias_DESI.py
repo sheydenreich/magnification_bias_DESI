@@ -104,6 +104,47 @@ def get_weights(weights_str, data):
     return weights
 
 
+#helper functions for alpha calculation
+def get_alpha(Boolean_change_left, Boolean_change_right, kappa, weights=None):
+    """Function to calculate alpha given how many objects fall out of the selection when applying an amount of lensing kappa and -kappa
+
+    Args:
+        Boolean_change_left (_type_): Bool array of objects falling out of selection when applying lensing kappa 
+        Boolean_change_right (_type_): Bool array of objects falling out of selection when applying lensing -kappa 
+        kappa (float): amount of lensing kappa applied
+        weights (float array, optional): Weights for each galaxy. Defaults to None.
+
+    Returns:
+        float: alpha simple estimate
+        float: Poisson uncertainty for alpha
+
+    """
+    
+    if(weights is None):
+        N = len(Boolean_change_left)
+        N_change_left = np.sum(Boolean_change_left) - N
+        N_change_right = np.sum(Boolean_change_right) - N
+    else:
+        #accounting for weights
+        N = np.sum(weights)
+        N_change_left = np.sum(weights[Boolean_change_left]) - N
+        N_change_right = np.sum(weights[Boolean_change_right]) - N
+    
+    #note the minus sign
+    alpha = (N_change_left - N_change_right )/N * 1. /(2.*kappa)
+    #shot noise (incorrect)
+    alpha_error = np.sqrt(np.abs(N_change_left)+np.abs(N_change_right))/N * 1./(2.*kappa) #shot noise error
+    
+    #this neglects contribution from N0 ! only very minor difference
+    error_from_N0 = alpha/np.sqrt(N)
+    alpha_error_full = np.sqrt(alpha_error**2 + error_from_N0**2)
+    print("base error: {}".format(alpha_error))
+    print("N0 error: {}".format(error_from_N0))
+    print("combined error: {}".format(alpha_error_full))
+
+    return alpha, alpha_error
+
+
 #calculate alpha from a single step size
 def calculate_alpha_simple_surveyX(data, kappa, lensing_func =apply_lensing , weights_str="baseline", use_exp_profile=False): 
     import magnification_bias_SDSS
