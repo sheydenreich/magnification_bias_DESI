@@ -14,6 +14,8 @@ from astropy.table import Table,join
 import os
 import fitsio
 
+import copy
+
 def load_survey_data(galaxy_type,config,zmin=None,zmax=None,debug=True):
     fpath_lss = config['general']['full_lss_path']
     fpath_gal = config['general']['lensing_path']
@@ -75,30 +77,52 @@ def apply_photocuts_DESI(data, galaxy_type):
     return selection_mask
 
 
-def apply_lensing(data_local,  kappa, plots=False, plot_output_filename="test.pdf", verbose=False, use_exp_profile=False):
+def apply_lensing(data,  kappa,  galaxy_type, verbose=False ):
     """Apply a small amount of lensing kappa to the observed magnitudes of the galaxy data. Combines all the functions to correctly apply the lensing for each type of magnitude in SDSS BOSS.
 
     Args:
         data_local : galaxy data
         kappa (float): lensing kappa
-        plots (bool, optional): Whether to plot out the kappa multipliers. Defaults to False.
-        plot_output_filename (str, optional): Filename for the kappa multiplier plot. Defaults to "test.pdf".
-        verbose (bool, optional): Print out details. Defaults to False.
-        use_exp_profile (bool, optional): Switch to using exponential intensity profile. Defaults to False.
+        galaxy_type: which galaxy sample
 
     Returns:
-        data_local: galaxy data with extra columns for lensed magnitudes named ..._mag
+        data: copy of galaxy data with extra columns for lensed magnitudes named ..._mag
     """
+    #TODO test if this works for the data_mag object. Want to copy it instead of overwriting the values
+    #having seperate columns for the magnified fluxes would be more memory efficient but that would requires significant
+    #changes in istarget.py
+    data_mag = copy.deepcopy(data_mag)
+
+    #note FLUX_IVAR_* are all only compared to >0. That can't be affected by lensing therefore can ignore
+    # 'FLUX_IVAR_G', 'FLUX_IVAR_R', 'FLUX_IVAR_Z', 'FLUX_IVAR_W1'
+    
+    
+    #for both LRG and BGS_BRIGHT need 'FLUX_G', 'FLUX_R', 'FLUX_Z', 'FLUX_W1'
+    #note: want to apply lensing after dereddening but for flux deredenning is multiplicative just like lensing so they are interchangable.
+    columns_to_magnify = ['FLUX_G', 'FLUX_R', 'FLUX_Z', 'FLUX_W1']
+    data_mag[columns_to_magnify] *= (1.+2.*kappa)
+
+
+    #the additional Fiber fluxes are more nuianced. Need size information for the galaxies to get an accurate estiamte,
+    #e.g. a radius 
+
+    if(galaxy_type == "LRG"):
+        columns_to_magnify_fiber = [ 'FIBERFLUX_Z', 'FIBERTOTFLUX_Z']
+    elif(galaxy_type == "BGS_BRIGHT"):
+        columns_to_magnify_fiber =  ['FIBERFLUX_R', 'FIBERTOTFLUX_R']
+    else:
+        raise ValueError(f"galaxy_type {galaxy_type} not recognized")
+    
+    #for now ignore the nuiance and just magnify them as if the full light is captured
+    data_mag[columns_to_magnify_fiber] *= (1.+2.*kappa)
+
+
     #If your survey only uses magnitudes that capture the full light of the galaxies, psf magnitudes and aperture magnitudes you can copy the method apply_lensing_v3 provided in magnification_bias_SDSS.py and just change the labels of the magnitudes used in your survey.
     #note has to work for negative kappa too!
-    return None
+    return data_mag
 
 
-def reapply_photocuts_surveyX(magnitudes_X, magnitudes_Y):
-    #implement the full photometric selection of your survey and return a boolean array for which galaxies pass the selection
-    return None
-
-def get_weights(weights_str, data):
+def get_weights(weights_str, data, galaxy_type):
     #implement the weights used for your galaxy survey. We used a string to switch between options but you can of course change that convention
     weights = None 
     return weights
@@ -168,7 +192,6 @@ def calculate_alpha_simple_DESI(data, kappa, galaxy_type, lensing_func =apply_le
     #convention: left-sided derivative on the faint end. So need minus sign
     data_mag = lensing_func(data,  kappa, galaxy_type)
 
-    #TODO: fill in how to get the magnitudes from your data. E.g. magnitudes_X = data["magnitudes_X_mag"] . They need to be the magnified magnitudes!
     combined_left = apply_photocuts_DESI(data_mag, galaxy_type)
     
     #other side
