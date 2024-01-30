@@ -91,7 +91,7 @@ def apply_lensing(data,  kappa,  galaxy_type, verbose=False ):
     #TODO test if this works for the data_mag object. Want to copy it instead of overwriting the values
     #having seperate columns for the magnified fluxes would be more memory efficient but that would requires significant
     #changes in istarget.py
-    data_mag = copy.deepcopy(data_mag)
+    data_mag = copy.deepcopy(data)
 
     #note FLUX_IVAR_* are all only compared to >0. That can't be affected by lensing therefore can ignore
     # 'FLUX_IVAR_G', 'FLUX_IVAR_R', 'FLUX_IVAR_Z', 'FLUX_IVAR_W1'
@@ -100,7 +100,8 @@ def apply_lensing(data,  kappa,  galaxy_type, verbose=False ):
     #for both LRG and BGS_BRIGHT need 'FLUX_G', 'FLUX_R', 'FLUX_Z', 'FLUX_W1'
     #note: want to apply lensing after dereddening but for flux deredenning is multiplicative just like lensing so they are interchangable.
     columns_to_magnify = ['FLUX_G', 'FLUX_R', 'FLUX_Z', 'FLUX_W1']
-    data_mag[columns_to_magnify] *= (1.+2.*kappa)
+    for column_to_magnify in columns_to_magnify:
+        data_mag[column_to_magnify] *= (1.+2.*kappa)
 
 
     #the additional Fiber fluxes are more nuianced. Need size information for the galaxies to get an accurate estiamte,
@@ -114,7 +115,8 @@ def apply_lensing(data,  kappa,  galaxy_type, verbose=False ):
         raise ValueError(f"galaxy_type {galaxy_type} not recognized")
     
     #for now ignore the nuiance and just magnify them as if the full light is captured
-    data_mag[columns_to_magnify_fiber] *= (1.+2.*kappa)
+    for column_to_magnify in columns_to_magnify_fiber:
+        data_mag[column_to_magnify] *= (1.+2.*kappa)
 
 
     #If your survey only uses magnitudes that capture the full light of the galaxies, psf magnitudes and aperture magnitudes you can copy the method apply_lensing_v3 provided in magnification_bias_SDSS.py and just change the labels of the magnitudes used in your survey.
@@ -195,7 +197,7 @@ def calculate_alpha_simple_DESI(data, kappa, galaxy_type, lensing_func =apply_le
     combined_left = apply_photocuts_DESI(data_mag, galaxy_type)
     
     #other side
-    data_mag = lensing_func(data,  -1.*kappa)
+    data_mag = lensing_func(data,  -1.*kappa, galaxy_type)
     combined_right = apply_photocuts_DESI(data_mag, galaxy_type)
     
     alpha, alpha_error = get_alpha(combined_left, combined_right, kappa, weights=weights)
