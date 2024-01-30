@@ -181,6 +181,79 @@ def get_weights(weights_str, data, galaxy_type):
     return weights
 
 
+#helper functions for fiber flux magnification
+def DeVaucouleurs_intensity(r_e,r):#in arcsec!
+    """Calculate the intensity at a given radius. Arbitrary normalization
+
+    Args:
+        r_e : characteristic radius
+        r : radius samples for the intensity
+
+    Returns:
+        array: Intensity array
+    """
+    I_e = 1
+    return I_e * np.exp(-7.669* ( (r/r_e)**(1./4.) -1.))
+
+def Exponential_intensity(r_e,r):#in arcsec!
+    """Alternative light profile to estimate systematic error budget
+
+    Args:
+        r_e : characteristic radius
+        r : radius samples for the intensity
+
+    Returns:
+        array: Intensity array
+    """
+    #calculate the intensity at a given radius
+    #r = 2 #fiber is 2 arcsec
+    I_e = 1
+    #https://ned.ipac.caltech.edu/level5/March05/Graham/Graham2.html
+    return I_e * np.exp(-1.678* ( (r/r_e) -1.))
+
+#derivative is with respect to the radius
+def Ffiber(theta_e, theta_f = 2., use_exp_profile=False):
+    """Calculate fiber flux for an intensity profile
+
+    Args:
+        theta_e : Characteristic radius of intensity profile
+        theta_f (optional): Aperture of the fiber flux. Defaults to 2..
+        use_exp_profile (bool, optional): Switch from DeVaucouleurs profile to exponential profile. Defaults to False.
+
+    Returns:
+        Flux
+    """
+    #integrate De Vaucouleurs profile over the fiber
+    step = 0.01
+    radius_samples = np.arange(0, theta_f+step, step)
+    if(not use_exp_profile):
+        #default
+        intensity = DeVaucouleurs_intensity(theta_e, radius_samples)
+    else:
+        intensity = Exponential_intensity(theta_e, radius_samples)
+    
+    integral = np.trapz(intensity*2*np.pi*radius_samples, x=radius_samples)
+    
+    return 2*np.pi * integral
+
+def get_cor_for_2fiber_mag(theta_e, use_exp_profile = False):
+    """Get the correction for the kappa multiplier for the 2arcsec fiber magnitude
+
+    Args:
+        theta_e : characteristic radius of galaxy
+        use_exp_profile (bool, optional): Switch from DeVaucouleurs profile to exponential profile. Defaults to False.
+
+    Returns:
+        float : kappa multiplier
+    """
+    #get the correction for the kappa multiplier for the 2 arcsec fiber flux
+    fiber_sizes = np.arange(1., 5, 0.1)
+    Ffiber_array = [Ffiber(theta_e=theta_e, theta_f = i, use_exp_profile=use_exp_profile ) for i in fiber_sizes]
+    dFfiber_dtheta = np.gradient(Ffiber_array, fiber_sizes)
+    dlnF_dlntheta = fiber_sizes/Ffiber_array * dFfiber_dtheta
+    return np.interp(2. , fiber_sizes, dlnF_dlntheta )
+
+
 #helper functions for alpha calculation
 def get_alpha(Boolean_change_left, Boolean_change_right, kappa, weights=None):
     """Function to calculate alpha given how many objects fall out of the selection when applying an amount of lensing kappa and -kappa
