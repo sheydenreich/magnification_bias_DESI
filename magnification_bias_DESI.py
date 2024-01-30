@@ -13,6 +13,7 @@ from astropy.io import fits
 from astropy.table import Table,join
 import os
 import fitsio
+from scipy.optimize import curve_fit
 
 import copy
 
@@ -147,21 +148,41 @@ def apply_lensing(data,  kappa,  galaxy_type, verbose=False ):
     for column_to_magnify in columns_to_magnify:
         data_mag[column_to_magnify] *= (1.+2.*kappa)
 
+    #absolute magnitude for BGS
+    if(galaxy_type == "BGS_BRIGHT"):
+        #absolute mag calculation commutes with additive change in the aparent magnitude calculation
+        data_mag["ABSMAG_RP0"] += - 2.5 * np.log10(1.+2.*kappa)
+        #sign: for positive kappa galaxy gets brighter -> aparent magnitude gets smaller
+
+
 
     #the additional Fiber fluxes are more nuianced. Need size information for the galaxies to get an accurate estiamte,
     #e.g. a radius 
 
     if(galaxy_type == "LRG"):
-        columns_to_magnify_fiber = [ 'FIBERFLUX_Z', 'FIBERTOTFLUX_Z']
+        fiber_column = "FIBERFLUX_Z"
+        fiber_tot_column = "FIBERTOTFLUX_Z"
     elif(galaxy_type == "BGS_BRIGHT"):
-        columns_to_magnify_fiber =  ['FIBERFLUX_R', 'FIBERTOTFLUX_R']
+        fiber_column = "FIBERFLUX_R"
+        fiber_tot_column = "FIBERTOTFLUX_R"
     else:
         raise ValueError(f"galaxy_type {galaxy_type} not recognized")
     
-    #for now ignore the nuiance and just magnify them as if the full light is captured
-    for column_to_magnify in columns_to_magnify_fiber:
-        data_mag[column_to_magnify] *= (1.+2.*kappa)
+    #only magnifying the galaxy not the surrounding light considered for FIBERTOTFLUX
+    diff_fibertot_fiber = data_mag[fiber_tot_column] - data_mag[fiber_column]
 
+
+    #fiber correction
+    theta_e_galaxies = data_mag["SHAPE_R"] # half light radius in arcsec ## SDSS: data_local['R_DEV'] *  0.396 #convert pixel to arcsec
+    theta_e_arr = np.arange(0.05, 10, 0.01)
+    cor_for_2fiber_mag_arr = [get_cor_for_2fiber_mag(theta_e=i, use_exp_profile=False) for i in theta_e_arr]
+    fiber_correction = np.interp(theta_e_galaxies, theta_e_arr, cor_for_2fiber_mag_arr)
+    #SDSS: data_local["fiber2Flux_mag"] = data_local["FIBER2FLUX"] * (1. +(2.- fiber_correction)*kappa)
+    
+    data_mag[fiber_column] *= (1. +(2.- fiber_correction)*kappa)
+
+
+    data_mag[fiber_tot_column] =  diff_fibertot_fiber + data_mag[fiber_column]
 
     #If your survey only uses magnitudes that capture the full light of the galaxies, psf magnitudes and aperture magnitudes you can copy the method apply_lensing_v3 provided in magnification_bias_SDSS.py and just change the labels of the magnitudes used in your survey.
     #note has to work for negative kappa too!
@@ -172,6 +193,79 @@ def get_weights(weights_str, data, galaxy_type):
     #implement the weights used for your galaxy survey. We used a string to switch between options but you can of course change that convention
     weights = None 
     return weights
+
+
+#helper functions for fiber flux magnification
+def DeVaucouleurs_intensity(r_e,r):#in arcsec!
+    """Calculate the intensity at a given radius. Arbitrary normalization
+
+    Args:
+        r_e : characteristic radius
+        r : radius samples for the intensity
+
+    Returns:
+        array: Intensity array
+    """
+    I_e = 1
+    return I_e * np.exp(-7.669* ( (r/r_e)**(1./4.) -1.))
+
+def Exponential_intensity(r_e,r):#in arcsec!
+    """Alternative light profile to estimate systematic error budget
+
+    Args:
+        r_e : characteristic radius
+        r : radius samples for the intensity
+
+    Returns:
+        array: Intensity array
+    """
+    #calculate the intensity at a given radius
+    #r = 2 #fiber is 2 arcsec
+    I_e = 1
+    #https://ned.ipac.caltech.edu/level5/March05/Graham/Graham2.html
+    return I_e * np.exp(-1.678* ( (r/r_e) -1.))
+
+#derivative is with respect to the radius
+def Ffiber(theta_e, theta_f = 2., use_exp_profile=False):
+    """Calculate fiber flux for an intensity profile
+
+    Args:
+        theta_e : Characteristic radius of intensity profile
+        theta_f (optional): Aperture of the fiber flux. Defaults to 2..
+        use_exp_profile (bool, optional): Switch from DeVaucouleurs profile to exponential profile. Defaults to False.
+
+    Returns:
+        Flux
+    """
+    #integrate De Vaucouleurs profile over the fiber
+    step = 0.01
+    radius_samples = np.arange(0, theta_f+step, step)
+    if(not use_exp_profile):
+        #default
+        intensity = DeVaucouleurs_intensity(theta_e, radius_samples)
+    else:
+        intensity = Exponential_intensity(theta_e, radius_samples)
+    
+    integral = np.trapz(intensity*2*np.pi*radius_samples, x=radius_samples)
+    
+    return 2*np.pi * integral
+
+def get_cor_for_2fiber_mag(theta_e, use_exp_profile = False):
+    """Get the correction for the kappa multiplier for the 2arcsec fiber magnitude
+
+    Args:
+        theta_e : characteristic radius of galaxy
+        use_exp_profile (bool, optional): Switch from DeVaucouleurs profile to exponential profile. Defaults to False.
+
+    Returns:
+        float : kappa multiplier
+    """
+    #get the correction for the kappa multiplier for the 2 arcsec fiber flux
+    fiber_sizes = np.arange(1., 5, 0.1)
+    Ffiber_array = [Ffiber(theta_e=theta_e, theta_f = i, use_exp_profile=use_exp_profile ) for i in fiber_sizes]
+    dFfiber_dtheta = np.gradient(Ffiber_array, fiber_sizes)
+    dlnF_dlntheta = fiber_sizes/Ffiber_array * dFfiber_dtheta
+    return np.interp(2. , fiber_sizes, dlnF_dlntheta )
 
 
 #helper functions for alpha calculation
@@ -214,10 +308,92 @@ def get_alpha(Boolean_change_left, Boolean_change_right, kappa, weights=None):
 
     return alpha, alpha_error
 
+def get_dN(lst_change_left, lst_change_right, weights=None):
+    """Helper function to get the changes in the sample for each step in the binwise estimate
+    """
+
+    n_bins = len(lst_change_left)
+    dNs = np.zeros(n_bins)
+    dNs_error = np.zeros(n_bins)
+    dNs_bins = np.zeros(n_bins-1)
+    dNs_bins_error = np.zeros(n_bins-1)
+
+    previous_N_change_left = 0
+    previous_N_change_right = 0
+    previous_N_error_left = 0
+    previous_N_error_right = 0
+    for i in range(n_bins):
+        Boolean_change_left = lst_change_left[i]
+        Boolean_change_right = lst_change_right[i]
+        if(weights is None):
+            N = len(Boolean_change_left)
+            N_change_left = np.sum(Boolean_change_left) - N
+            N_change_right = np.sum(Boolean_change_right) - N
+            dNs[i] = N_change_left - N_change_right
+            dNs_error[i] = np.sqrt(np.abs(N_change_left)+np.abs(N_change_right))
+            if(i>0):
+                dNs_bins[i-1] = dNs[i] - dNs[i-1]
+                dNs_bins_error[i-1] = np.sqrt(np.abs(N_change_left-previous_N_change_left) + np.abs(N_change_right-previous_N_change_right))
+        else:
+            #accounting for weights
+            N = np.sum(weights)
+            N_change_left = np.sum(weights[Boolean_change_left]) - N
+            N_change_right = np.sum(weights[Boolean_change_right]) - N
+            N_error_left = np.sum(weights[Boolean_change_left]**2) - np.sum(weights**2) #only counting the objects that fall out under lensing
+            N_error_right = np.sum(weights[Boolean_change_right]**2) - np.sum(weights**2)
+            #todo
+            dNs[i] = N_change_left - N_change_right
+            dNs_error[i] = np.sqrt(np.abs(N_error_left) + np.abs(N_error_right)) #poisson error with weights, for weights = 1 returning to standard Poisson error
+            if(i>0):
+                dNs_bins[i-1] = dNs[i] - dNs[i-1]
+                #now need to use the weights in the bin
+                dNs_bins_error[i-1] = np.sqrt(np.abs(N_error_left-previous_N_error_left) + np.abs(N_error_right-previous_N_error_right))
+            #saving the previous values to allow for the binwise estimates
+            previous_N_error_left = N_error_left
+            previous_N_error_right = N_error_right
+        previous_N_change_left = N_change_left
+        previous_N_change_right = N_change_right
+
+    return dNs, dNs_error, dNs_bins, dNs_bins_error
+
+def fit_linear(xdats, ydats, sigmas):
+    """Fit a line to the data
+
+    Returns:
+        dictionary: result of the fit
+    """
+    fit = {}
+    #fitting a line through all points
+    func = lambda x, a, c: a*x +  c
+    res, cov = curve_fit(func, xdats, ydats, sigma=sigmas, absolute_sigma=True)# this is very subtle!!!
+    fit["xdats"] = xdats
+    fit["ydats"] = ydats
+    fit["sigmas"] = sigmas
+    fit["alpha_fit"] = res[1]
+    fit["alpha_fit_error"] = np.sqrt(cov[1,1])
+    fit["slope_fit"] = res[0]
+    fit["slope_fit_error"] = np.sqrt(cov[0,0])
+    fit["cov"] = cov
+
+    chi2 =  np.sum((ydats - func(xdats,*res))**2 / sigmas**2)
+    n_bins = len(ydats)
+    dof = n_bins - len(res)#(ii_max - ii_min - len(res))
+    red_chi2 =  chi2 / dof
+    print(chi2, red_chi2)
+    fit["chi2"] = chi2
+    fit["red_chi2"] = red_chi2
+    from scipy import stats
+    PTE = stats.chi2.sf(chi2, dof)
+    fit["dof"] = dof
+    fit["PTE"] = PTE
+    print("PTE = {}".format(PTE))
+    from scipy.special import erfinv
+    fit["PTE_in_sigma"] = erfinv(1. -PTE ) * np.sqrt(2.)
+    return fit
+
 
 #calculate alpha from a single step size
 def calculate_alpha_simple_DESI(data, kappa, galaxy_type, lensing_func =apply_lensing , weights_str="none"): 
-    import magnification_bias_SDSS
     """Function to calculate the simple estimate for alpha for survey X
 
     Args:
@@ -255,7 +431,7 @@ def calculate_alpha_simple_DESI(data, kappa, galaxy_type, lensing_func =apply_le
     return alpha, alpha_error
 
 #calculate alpha from multiple step sizes
-def calculate_alpha_surveyX(data, kappas, lensing_func =apply_lensing , weights_str="baseline", use_exp_profile=False): 
+def calculate_alpha_DESI(data, kappas, galaxy_type, lensing_func =apply_lensing , weights_str="none"):  #, use_exp_profile=False
     """Baseline magnification bias estimate with our binwise estimator for CMASS.
 
     Args:
@@ -263,21 +439,21 @@ def calculate_alpha_surveyX(data, kappas, lensing_func =apply_lensing , weights_
         kappas (array): array of kappa steps
         lensing_func (func, optional): Function to apply lensing kappa to the data. Defaults to apply_lensing_v3.
         weights_str (array, optional): Weights for each galaxy. Using a string to select cases. Defaults to "baseline".
-        use_exp_profile (bool, optional): Switch to using an exponential profile. Defaults to False.
+        #use_exp_profile (bool, optional): Switch to using an exponential profile. Defaults to False.
 
     Returns:
         dictionary: result for the magnification bias estimate
     """
     #assuming kappa positive
-    weights = get_weights(weights_str, data)
+    weights = get_weights(weights_str, data, galaxy_type)
     #change in N for each kappa bin. 
     dNs = np.zeros_like(kappas)
     if(weights is None):
-        N0 = len(data["Z"])
+        N0 = len(data["RA"])
     else:
         N0 = np.sum(weights)
     kappa_step = kappas[1] - kappas[0] #assuming uniform spacing
-    print("starting CMASS")
+    print("starting")
 
     if(weights is not None):
         print("weighted mean redshift = {:.3f}".format(np.average(data["Z"], weights=weights)))
@@ -291,17 +467,17 @@ def calculate_alpha_surveyX(data, kappas, lensing_func =apply_lensing , weights_
         #print(kappa)
         #postivite kappa: increase #gal at faint end. 
         #convention: left-sided derivative on the faint end. So need a minus sign
-        data = lensing_func(data,  kappa, use_exp_profile=use_exp_profile)
-        combined_left, each_condition_left = reapply_photocuts_surveyX(TODO)
+        data_mag = lensing_func(data,  kappa, galaxy_type)# use_exp_profile=use_exp_profile)
+        combined_left = apply_photocuts_DESI(data_mag, galaxy_type)
         
         #other side
-        data = lensing_func(data,  -1.*kappa, use_exp_profile=use_exp_profile)
-        combined_right, each_condition_right = reapply_photocuts_surveyX(TODO)
+        data_mag = lensing_func(data,  -1.*kappa, galaxy_type)# use_exp_profile=use_exp_profile)
+        combined_right = apply_photocuts_DESI(data_mag, galaxy_type)
         
         lst_left.append(combined_left)
         lst_right.append(combined_right)
 
-    dNs, dNs_error, dNs_bins, dNs_bins_error = magnification_bias_SDSS.get_dN(lst_left, lst_right, weights=weights)
+    dNs, dNs_error, dNs_bins, dNs_bins_error = get_dN(lst_left, lst_right, weights=weights)
 
         
     result = {}
@@ -329,7 +505,7 @@ def calculate_alpha_surveyX(data, kappas, lensing_func =apply_lensing , weights_
     xdats = result["kappas"][1:]-(kappa_step/2.)
     ydats = result["As"]
     sigmas = result["As_error"]
-    result["fit"] = magnification_bias_SDSS.fit_linear(xdats, ydats, sigmas)
+    result["fit"] = fit_linear(xdats, ydats, sigmas)
 
     
     return result
