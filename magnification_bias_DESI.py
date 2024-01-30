@@ -147,6 +147,13 @@ def apply_lensing(data,  kappa,  galaxy_type, verbose=False ):
     for column_to_magnify in columns_to_magnify:
         data_mag[column_to_magnify] *= (1.+2.*kappa)
 
+    #absolute magnitude for BGS
+    if(galaxy_type == "BGS_BRIGHT"):
+        #absolute mag calculation commutes with additive change in the aparent magnitude calculation
+        data_mag["ABSMAG_RP0"] += - 2.5 * np.log10(1.+2.*kappa)
+        #sign: for positive kappa galaxy gets brighter -> aparent magnitude gets smaller
+
+
 
     #the additional Fiber fluxes are more nuianced. Need size information for the galaxies to get an accurate estiamte,
     #e.g. a radius 
