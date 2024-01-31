@@ -1,30 +1,11 @@
 from scipy.optimize import curve_fit
 import numpy as np  
-import magnification_bias_DESI
+from  magnification_bias_DESI import get_required_columns,apply_magnitude_cuts
 from astropy.table import Table
 import fitsio
 import os
+import json
 
-def apply_tsnr_cut(data_table, galaxy_type):
-    if(galaxy_type[:3] in ["LRG","ELG"]):
-        cut_col = "TSNR2_ELG"
-        cut_val = 80
-    elif(galaxy_type[:3]=="BGS"):
-        cut_col = "TSNR2_BGS"
-        cut_val = 1000
-    mask = (data_table[cut_col]>cut_val)
-    return mask
-
-def select_good_redshifts(data_table, galaxy_type, zcol="Z"):
-    if(galaxy_type in ["BGS","BGS_BRIGHT"]):
-        mask = ((data_table["ZWARN"] == 0) & (data_table["DELTACHI2"] > 40))
-    elif(galaxy_type=="LRG"):
-        mask = ((data_table["ZWARN"] == 0) & (data_table["DELTACHI2"] > 15) & (data_table[zcol] < 1.5))
-    elif(galaxy_type=="ELG"):
-        mask = ((data_table["ZWARN"] < 99) & (data_table["o2c"] > 0.9))
-    else:
-        raise ValueError("Invalid value of galaxy_type in select_good_redshifts. Allowed: [BGS,BGS_BRIGHT,LRG,ELG]. Here: {}".format(galaxy_type))
-    return mask
 
 def power_law(x, a, b):
     return a * np.power(x, b)
@@ -68,7 +49,7 @@ def fit_secondary_quantities(config):
 
     secondary_quantity_dict = {}
     for galaxy_type in galaxy_types:
-        required_columns = magnification_bias_DESI.get_required_columns(galaxy_type)
+        required_columns = get_required_columns(galaxy_type)
         if galaxy_type[:3] in ["LRG","ELG"]:
             required_columns += ["Z_not4clus"]
         elif galaxy_type[:3] == "BGS":
@@ -79,7 +60,7 @@ def fit_secondary_quantities(config):
         
         # cut to the galaxy sample that is relevant for us
         # IMPORTANT: We do not apply the secondary cuts here, as they would otherwise bias the power-law fits
-        magnitude_mask = magnification_bias_DESI.apply_magnitude_cuts(lss_tab, galaxy_type, mag_col="ABSMAG01_SDSS_R", zcol="Z_not4clus")
+        magnitude_mask = apply_magnitude_cuts(lss_tab, galaxy_type, mag_col="ABSMAG01_SDSS_R", zcol="Z_not4clus")
         lss_tab = lss_tab[magnitude_mask]
 
         fit_xval = config['secondary_properties'][f"Xval_{galaxy_type}"]
@@ -110,9 +91,11 @@ def fit_secondary_quantities(config):
             plt.savefig(plots_path+f"{galaxy_type}_{fit_xval}_vs_{fit_yval}.png",dpi=300,bbox_inches='tight')
             plt.close()
 
-            secondary_quantity_dict[f"{galaxy_type}_{fit_xval}_{fit_yval}"] = params
+            secondary_quantity_dict[f"{galaxy_type}_{fit_xval}_{fit_yval}"] = list(params)
     os.makedirs(os.path.dirname(os.path.abspath(__file__))+os.sep+"results"+os.sep,exist_ok=True)
-    np.savez(os.path.dirname(os.path.abspath(__file__))+os.sep+"results"+os.sep+"secondary_quantity_fits",secondary_quantity_dict)            
+    with open(os.path.dirname(os.path.abspath(__file__))+os.sep+"results"+os.sep+"secondary_quantity_fits.json", 'w', encoding='utf-8') as f:
+        json.dump(secondary_quantity_dict,f, ensure_ascii=False, indent=4)
+
 
 if __name__ == "__main__":
     import configparser
