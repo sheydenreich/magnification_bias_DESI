@@ -75,4 +75,3 @@ out_fname = config['output']['output_filename']
 os.makedirs(outpath,exist_ok=True)
 with open(outpath+out_fname, 'w', encoding='utf-8') as outfile:
     json.dump(full_results, outfile, ensure_ascii=False, indent=4)
-#TODO use full code with multiple step sizes decide how to save the information

@@ -369,6 +369,13 @@ def fit_linear(xdats, ydats, sigmas):
     return fit
 
 
+def apply_all_cuts(full_tab,galaxy_type):
+    selection_mask = apply_photocuts_DESI(full_tab,galaxy_type)
+    magnitude_mask = apply_magnitude_cuts(full_tab,galaxy_type)
+    secondery_mask = apply_secondary_cuts(full_tab,galaxy_type)
+    return selection_mask * magnitude_mask * secondery_mask
+
+
 #calculate alpha from a single step size
 def calculate_alpha_simple_DESI(data, kappa, galaxy_type, config, lensing_func =apply_lensing , weights_str="none"): 
     """Function to calculate the simple estimate for alpha for survey X
@@ -391,7 +398,7 @@ def calculate_alpha_simple_DESI(data, kappa, galaxy_type, config, lensing_func =
     #convention: left-sided derivative on the faint end. So need minus sign
     data_mag = lensing_func(data,  kappa, galaxy_type, config)
 
-    combined_left = apply_photocuts_DESI(data_mag, galaxy_type)
+    combined_left = apply_all_cuts(data_mag, galaxy_type)
     if(config.getboolean("general","apply_cut_secondary_properties")):
         secondary_prop_mask = apply_secondary_cuts(data_mag, galaxy_type)
         print("Secondary properties left remove {}/{} galaxies".format(np.sum(~secondary_prop_mask), len(secondary_prop_mask)))
@@ -399,7 +406,7 @@ def calculate_alpha_simple_DESI(data, kappa, galaxy_type, config, lensing_func =
 
     #other side
     data_mag = lensing_func(data,  -1.*kappa, galaxy_type, config)
-    combined_right = apply_photocuts_DESI(data_mag, galaxy_type)
+    combined_right = apply_all_cuts(data_mag, galaxy_type)
     if(config.getboolean("general","apply_cut_secondary_properties")):
         secondary_prop_mask = apply_secondary_cuts(data_mag, galaxy_type)
         print("Secondary properties right remove {}/{} galaxies".format(np.sum(~secondary_prop_mask), len(secondary_prop_mask)))
@@ -453,7 +460,7 @@ def calculate_alpha_DESI(data, kappas, galaxy_type, config, lensing_func =apply_
         #postivite kappa: increase #gal at faint end. 
         #convention: left-sided derivative on the faint end. So need a minus sign
         data_mag = lensing_func(data,  kappa, galaxy_type, config)# use_exp_profile=use_exp_profile)
-        combined_left = apply_photocuts_DESI(data_mag, galaxy_type)
+        combined_left = apply_all_cuts(data_mag, galaxy_type)
         if(config.getboolean("general","apply_cut_secondary_properties")):
             secondary_prop_mask = apply_secondary_cuts(data_mag, galaxy_type)
             # print("Secondary properties left remove {}/{} galaxies".format(np.sum(~secondary_prop_mask),len(secondary_prop_mask)))
@@ -461,7 +468,7 @@ def calculate_alpha_DESI(data, kappas, galaxy_type, config, lensing_func =apply_
         
         #other side
         data_mag = lensing_func(data,  -1.*kappa, galaxy_type, config)# use_exp_profile=use_exp_profile)
-        combined_right = apply_photocuts_DESI(data_mag, galaxy_type)
+        combined_right = apply_all_cuts(data_mag, galaxy_type)
         if(config.getboolean("general","apply_cut_secondary_properties")):
             secondary_prop_mask = apply_secondary_cuts(data_mag, galaxy_type)
             # print("Secondary properties right remove {}/{} galaxies".format(np.sum(~secondary_prop_mask),len(secondary_prop_mask)))
@@ -489,7 +496,7 @@ def calculate_alpha_DESI(data, kappas, galaxy_type, config, lensing_func =apply_
     result["As_error"] = dNs_bins_error*norm
 
     #getting the simple estimates for free
-    print("Not including R in the alpha simple estimate")
+    #print("Not including R in the alpha simple estimate")
     result["alpha_simple"] = (dNs[1:] / (N0 * 2* kappas[1:])) #+R_over2N0
     result["alpha_simple_error"] = dNs_error[1:] / (N0 * 2* kappas[1:])
     result["alpha_simple_error_full"] = np.sqrt((dNs_error[1:]**2 / (N0 * 2* kappas[1:])**2) + (result["alpha_simple"]**2/N0))
