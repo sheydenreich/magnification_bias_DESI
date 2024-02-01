@@ -125,9 +125,9 @@ def apply_lensing(data,  kappa,  galaxy_type, config, verbose=False ):
 
 
     #fiber correction
-    theta_e_galaxies = data_mag["SHAPE_R"] # half light radius in arcsec ## SDSS: data_local['R_DEV'] *  0.396 #convert pixel to arcsec
+    theta_e_galaxies = np.sqrt(data_mag["SHAPE_R"]**2+1) # half light radius in arcsec ## SDSS: data_local['R_DEV'] *  0.396 #convert pixel to arcsec
     theta_e_arr = np.arange(0.05, 10, 0.01)
-    cor_for_2fiber_mag_arr = [get_cor_for_2fiber_mag(theta_e=i, use_exp_profile=False) for i in theta_e_arr]
+    cor_for_2fiber_mag_arr = [get_cor_for_1p5fiber_mag(theta_e=i, use_exp_profile=False) for i in theta_e_arr]
     fiber_correction = np.interp(theta_e_galaxies, theta_e_arr, cor_for_2fiber_mag_arr)
     #SDSS: data_local["fiber2Flux_mag"] = data_local["FIBER2FLUX"] * (1. +(2.- fiber_correction)*kappa)
     
@@ -227,7 +227,7 @@ def Ffiber(theta_e, theta_f = 2., use_exp_profile=False):
     
     return 2*np.pi * integral
 
-def get_cor_for_2fiber_mag(theta_e, use_exp_profile = False):
+def get_cor_for_1p5fiber_mag(theta_e, use_exp_profile = False):
     """Get the correction for the kappa multiplier for the 2arcsec fiber magnitude
 
     Args:
@@ -242,7 +242,7 @@ def get_cor_for_2fiber_mag(theta_e, use_exp_profile = False):
     Ffiber_array = [Ffiber(theta_e=theta_e, theta_f = i, use_exp_profile=use_exp_profile ) for i in fiber_sizes]
     dFfiber_dtheta = np.gradient(Ffiber_array, fiber_sizes)
     dlnF_dlntheta = fiber_sizes/Ffiber_array * dFfiber_dtheta
-    return np.interp(2. , fiber_sizes, dlnF_dlntheta )
+    return np.interp(1.5 , fiber_sizes, dlnF_dlntheta )
 
 
 #helper functions for alpha calculation
