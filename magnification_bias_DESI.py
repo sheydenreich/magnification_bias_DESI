@@ -66,8 +66,7 @@ def load_survey_data(galaxy_type,config,zmin=None,zmax=None,debug=False):
     secondery_mask = apply_secondary_cuts(full_tab,galaxy_type)
     if not np.all(secondery_mask):
         print("*"*50)
-        print(f"WARNING: Secondary properties remove {np.sum(~secondery_mask)} galaxies! This should not happen.")
-        print("*"*50)
+        raise ValueError(f"Secondary properties remove {np.sum(~secondery_mask)} galaxies! This should not happen.")
 
     print(f"Loaded {len(full_tab)} {galaxy_type} galaxies, {len(full_tab)-np.sum(selection_mask & magnitude_mask)} did not pass the photometric cuts")
     return full_tab[selection_mask & magnitude_mask]
@@ -369,10 +368,15 @@ def fit_linear(xdats, ydats, sigmas):
     return fit
 
 
-def apply_all_cuts(full_tab,galaxy_type):
+def apply_all_cuts(full_tab,galaxy_type,config, verbose = False):
     selection_mask = apply_photocuts_DESI(full_tab,galaxy_type)
     magnitude_mask = apply_magnitude_cuts(full_tab,galaxy_type)
-    secondery_mask = apply_secondary_cuts(full_tab,galaxy_type)
+    if(config.getboolean("general","apply_cut_secondary_properties")):
+        secondery_mask = apply_secondary_cuts(full_tab,galaxy_type)
+        if(verbose):
+            print("Secondary properties remove {}/{} galaxies".format(np.sum(~secondery_mask), len(secondery_mask)))
+    else:
+        secondery_mask = np.ones(len(full_tab),dtype=bool)
     return selection_mask * magnitude_mask * secondery_mask
 
 
@@ -398,19 +402,11 @@ def calculate_alpha_simple_DESI(data, kappa, galaxy_type, config, lensing_func =
     #convention: left-sided derivative on the faint end. So need minus sign
     data_mag = lensing_func(data,  kappa, galaxy_type, config)
 
-    combined_left = apply_all_cuts(data_mag, galaxy_type)
-    if(config.getboolean("general","apply_cut_secondary_properties")):
-        secondary_prop_mask = apply_secondary_cuts(data_mag, galaxy_type)
-        print("Secondary properties left remove {}/{} galaxies".format(np.sum(~secondary_prop_mask), len(secondary_prop_mask)))
-        combined_left &= secondary_prop_mask
+    combined_left = apply_all_cuts(data_mag, galaxy_type, config, verbose=True)
 
     #other side
     data_mag = lensing_func(data,  -1.*kappa, galaxy_type, config)
-    combined_right = apply_all_cuts(data_mag, galaxy_type)
-    if(config.getboolean("general","apply_cut_secondary_properties")):
-        secondary_prop_mask = apply_secondary_cuts(data_mag, galaxy_type)
-        print("Secondary properties right remove {}/{} galaxies".format(np.sum(~secondary_prop_mask), len(secondary_prop_mask)))
-        combined_right &= secondary_prop_mask
+    combined_right = apply_all_cuts(data_mag, galaxy_type, config, verbose=True)
     
     alpha, alpha_error = get_alpha(combined_left, combined_right, kappa, weights=weights)
     print("-------")
@@ -460,19 +456,11 @@ def calculate_alpha_DESI(data, kappas, galaxy_type, config, lensing_func =apply_
         #postivite kappa: increase #gal at faint end. 
         #convention: left-sided derivative on the faint end. So need a minus sign
         data_mag = lensing_func(data,  kappa, galaxy_type, config)# use_exp_profile=use_exp_profile)
-        combined_left = apply_all_cuts(data_mag, galaxy_type)
-        if(config.getboolean("general","apply_cut_secondary_properties")):
-            secondary_prop_mask = apply_secondary_cuts(data_mag, galaxy_type)
-            # print("Secondary properties left remove {}/{} galaxies".format(np.sum(~secondary_prop_mask),len(secondary_prop_mask)))
-            combined_left &= secondary_prop_mask
+        combined_left = apply_all_cuts(data_mag, galaxy_type, config)
         
         #other side
         data_mag = lensing_func(data,  -1.*kappa, galaxy_type, config)# use_exp_profile=use_exp_profile)
-        combined_right = apply_all_cuts(data_mag, galaxy_type)
-        if(config.getboolean("general","apply_cut_secondary_properties")):
-            secondary_prop_mask = apply_secondary_cuts(data_mag, galaxy_type)
-            # print("Secondary properties right remove {}/{} galaxies".format(np.sum(~secondary_prop_mask),len(secondary_prop_mask)))
-            combined_right &= secondary_prop_mask
+        combined_right = apply_all_cuts(data_mag, galaxy_type, config)
 
         
         lst_left.append(combined_left)
