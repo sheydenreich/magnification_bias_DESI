@@ -8,55 +8,18 @@
 #For an example see magnification_bias_SDSS.py
 
 import numpy as np
-from istarget import select_lrg,select_bgs_bright,get_required_columns
+from istarget import get_required_columns
 from astropy.io import fits
 from astropy.table import Table,join
 import os
 import fitsio
 from scipy.optimize import curve_fit
+from cuts import apply_photocuts_DESI,apply_magnitude_cuts,apply_secondary_cuts
+import json
 
 import copy
 
-def get_redshift_bins(galaxy_type):
-    if(galaxy_type == "LRG"):
-        return np.array([0.4,0.6,0.8,1.1])
-    elif(galaxy_type=="BGS_BRIGHT"):
-        return np.array([0.1,0.2,0.3,0.4])
-    else:
-        raise ValueError("Invalid value of galaxy_type in get_redshift_bins. Allowed: [BGS_BRIGHT,LRG]. Here: {}".format(galaxy_type))
-
-def get_magnitude_cuts(galaxy_type):
-    if(galaxy_type in ["LRG","ELG"]):
-        return None
-    elif(galaxy_type=="BGS_BRIGHT"):
-        return -1.*np.array([19.5,20.5,21.0])
-    else:
-        raise ValueError("Invalid value of galaxy_type in get_magnitude_cuts. Allowed: [BGS_BRIGHT,LRG]. Here: {}".format(galaxy_type))
-
-def create_redshift_mask(reference_redshifts,z_bins_lens):
-    if z_bins_lens is None:
-        return np.ones(len(reference_redshifts),dtype=bool)
-    else:
-        redshift_mask = ((reference_redshifts >= z_bins_lens[0]) & (reference_redshifts < z_bins_lens[-1]))
-        return redshift_mask
-
-
-def get_magnitude_mask(data_table,magnitude_cuts,lens_bins,mag_col="ABSMAG_RP0",zcol="Z"):
-    if magnitude_cuts is None:
-        return np.ones(len(data_table),dtype=bool)
-    redshift_mask = create_redshift_mask(data_table[zcol],lens_bins)
-    lens_zbins = (np.digitize(data_table[zcol],lens_bins)-1).astype(int)
-    mask_magnitudes = np.zeros(len(data_table),dtype=bool)
-    mask_magnitudes[redshift_mask] = (data_table[mag_col][redshift_mask] < magnitude_cuts[lens_zbins[redshift_mask]])
-    return mask_magnitudes
-
-def apply_magnitude_cuts(data_table,galaxy_type):
-    magnitude_cuts = get_magnitude_cuts(galaxy_type)
-    lens_bins = get_redshift_bins(galaxy_type)
-    mask_magnitudes = get_magnitude_mask(data_table,magnitude_cuts,lens_bins)
-    return mask_magnitudes
-
-def load_survey_data(galaxy_type,config,zmin=None,zmax=None,debug=True):
+def load_survey_data(galaxy_type,config,zmin=None,zmax=None,debug=False):
     fpath_lss = config['general']['full_lss_path']
     fpath_gal = config['general']['lensing_path']
     version = config['general']['version']
@@ -100,29 +63,17 @@ def load_survey_data(galaxy_type,config,zmin=None,zmax=None,debug=True):
     # I am not sure why that is. It is only ~10 galaxies though, so the error should be irrelevant
     selection_mask = apply_photocuts_DESI(full_tab,galaxy_type)
     magnitude_mask = apply_magnitude_cuts(full_tab,galaxy_type)
+    secondery_mask = apply_secondary_cuts(full_tab,galaxy_type)
+    if not np.all(secondery_mask):
+        print("*"*50)
+        raise ValueError(f"Secondary properties remove {np.sum(~secondery_mask)} galaxies! This should not happen.")
 
     print(f"Loaded {len(full_tab)} {galaxy_type} galaxies, {len(full_tab)-np.sum(selection_mask & magnitude_mask)} did not pass the photometric cuts")
     return full_tab[selection_mask & magnitude_mask]
 
-def apply_photocuts_DESI(data, galaxy_type):
-    if galaxy_type == "LRG":
-        selection_fnc = select_lrg
-    elif galaxy_type == "BGS_BRIGHT":
-        selection_fnc = select_bgs_bright
-    else:
-        raise ValueError(f"galaxy_type {galaxy_type} not recognized")
-    # split into north and south region, as selection function is different
-    mask_north = (data['PHOTSYS'] == 'N')
-    photoz_selection_north = selection_fnc(data[mask_north],field='north')
-    photoz_selection_south = selection_fnc(data[~mask_north],field='south')
-    selection_mask = np.zeros(len(data),dtype=bool)
-    selection_mask[mask_north] = photoz_selection_north
-    selection_mask[~mask_north] = photoz_selection_south
-    magnitude_mask = apply_magnitude_cuts(data,galaxy_type)
-    return (selection_mask & magnitude_mask)
 
 
-def apply_lensing(data,  kappa,  galaxy_type, verbose=False ):
+def apply_lensing(data,  kappa,  galaxy_type, config, verbose=False ):
     """Apply a small amount of lensing kappa to the observed magnitudes of the galaxy data. Combines all the functions to correctly apply the lensing for each type of magnitude in SDSS BOSS.
 
     Args:
@@ -173,21 +124,46 @@ def apply_lensing(data,  kappa,  galaxy_type, verbose=False ):
 
 
     #fiber correction
-    theta_e_galaxies = data_mag["SHAPE_R"] # half light radius in arcsec ## SDSS: data_local['R_DEV'] *  0.396 #convert pixel to arcsec
+    theta_e_galaxies = np.sqrt(data_mag["SHAPE_R"]**2+1) # half light radius in arcsec ## SDSS: data_local['R_DEV'] *  0.396 #convert pixel to arcsec
     theta_e_arr = np.arange(0.05, 10, 0.01)
-    cor_for_2fiber_mag_arr = [get_cor_for_2fiber_mag(theta_e=i, use_exp_profile=False) for i in theta_e_arr]
+    cor_for_2fiber_mag_arr = [get_cor_for_1p5fiber_mag(theta_e=i, use_exp_profile=False) for i in theta_e_arr]
     fiber_correction = np.interp(theta_e_galaxies, theta_e_arr, cor_for_2fiber_mag_arr)
     #SDSS: data_local["fiber2Flux_mag"] = data_local["FIBER2FLUX"] * (1. +(2.- fiber_correction)*kappa)
     
+    # to lens secondary properties we need difference between unmagnified and magnified fiber flux
+    if(config.getboolean("general","apply_cut_secondary_properties")):
+        secondary_properties_fiber_column = config["secondary_properties"][f"Xval_{galaxy_type}"]
+        fibermag_unmagnified = copy.deepcopy(data_mag[secondary_properties_fiber_column])
+
+    # lensing the fiber fluxes
     data_mag[fiber_column] *= (1. +(2.- fiber_correction)*kappa)
-
-
     data_mag[fiber_tot_column] =  diff_fibertot_fiber + data_mag[fiber_column]
+
+    #lensing the secondary properties
+    if(config.getboolean("general","apply_cut_secondary_properties")):
+        data_mag = apply_lensing_secondary_properties(data_mag, fibermag_unmagnified, galaxy_type, config, verbose=verbose)
 
     #If your survey only uses magnitudes that capture the full light of the galaxies, psf magnitudes and aperture magnitudes you can copy the method apply_lensing_v3 provided in magnification_bias_SDSS.py and just change the labels of the magnitudes used in your survey.
     #note has to work for negative kappa too!
     return data_mag
 
+def apply_lensing_secondary_properties(data, fibermag_unmagnified, galaxy_type, config, verbose=False ):
+    try:
+        with open(os.path.dirname(os.path.abspath(__file__))+os.sep+"results"+os.sep+"secondary_quantity_fits.json",'r') as f:
+            fit_param_dict = json.load(f)
+    except Exception as e:
+        print("Error: {}".format(e))
+        print("Error: Could not load the fit parameters for the secondary properties. Please run the secondary_cuts.py script first.")
+        import sys
+        sys.exit(1)
+
+    secondary_properties_fiber_column = config["secondary_properties"][f"Xval_{galaxy_type}"]
+    affected_secondary_properties = config["secondary_properties"][f"relevant_secondary_properties_{galaxy_type}"].strip().split(",")
+    for secondary_property in affected_secondary_properties:
+        a,b = fit_param_dict[f"{galaxy_type}_{secondary_properties_fiber_column}_{secondary_property}"]
+        # do a 1st-order Taylor expansion of the fitted power-law a*x^b
+        data[secondary_property] = data[secondary_property] + a*b*np.power(fibermag_unmagnified, b-1.)*(data[secondary_properties_fiber_column]-fibermag_unmagnified)
+    return data
 
 def get_weights(weights_str, data, galaxy_type):
     #implement the weights used for your galaxy survey. We used a string to switch between options but you can of course change that convention
@@ -250,7 +226,7 @@ def Ffiber(theta_e, theta_f = 2., use_exp_profile=False):
     
     return 2*np.pi * integral
 
-def get_cor_for_2fiber_mag(theta_e, use_exp_profile = False):
+def get_cor_for_1p5fiber_mag(theta_e, use_exp_profile = False):
     """Get the correction for the kappa multiplier for the 2arcsec fiber magnitude
 
     Args:
@@ -265,7 +241,7 @@ def get_cor_for_2fiber_mag(theta_e, use_exp_profile = False):
     Ffiber_array = [Ffiber(theta_e=theta_e, theta_f = i, use_exp_profile=use_exp_profile ) for i in fiber_sizes]
     dFfiber_dtheta = np.gradient(Ffiber_array, fiber_sizes)
     dlnF_dlntheta = fiber_sizes/Ffiber_array * dFfiber_dtheta
-    return np.interp(2. , fiber_sizes, dlnF_dlntheta )
+    return np.interp(1.5 , fiber_sizes, dlnF_dlntheta )
 
 
 #helper functions for alpha calculation
@@ -392,8 +368,20 @@ def fit_linear(xdats, ydats, sigmas):
     return fit
 
 
+def apply_all_cuts(full_tab,galaxy_type,config, verbose = False):
+    selection_mask = apply_photocuts_DESI(full_tab,galaxy_type)
+    magnitude_mask = apply_magnitude_cuts(full_tab,galaxy_type)
+    if(config.getboolean("general","apply_cut_secondary_properties")):
+        secondery_mask = apply_secondary_cuts(full_tab,galaxy_type)
+        if(verbose):
+            print("Secondary properties remove {}/{} galaxies".format(np.sum(~secondery_mask), len(secondery_mask)))
+    else:
+        secondery_mask = np.ones(len(full_tab),dtype=bool)
+    return selection_mask * magnitude_mask * secondery_mask
+
+
 #calculate alpha from a single step size
-def calculate_alpha_simple_DESI(data, kappa, galaxy_type, lensing_func =apply_lensing , weights_str="none"): 
+def calculate_alpha_simple_DESI(data, kappa, galaxy_type, config, lensing_func =apply_lensing , weights_str="none"): 
     """Function to calculate the simple estimate for alpha for survey X
 
     Args:
@@ -412,13 +400,13 @@ def calculate_alpha_simple_DESI(data, kappa, galaxy_type, lensing_func =apply_le
     weights = get_weights(weights_str, data, galaxy_type)
     #postivite kappa: increase #gal at faint end. 
     #convention: left-sided derivative on the faint end. So need minus sign
-    data_mag = lensing_func(data,  kappa, galaxy_type)
+    data_mag = lensing_func(data,  kappa, galaxy_type, config)
 
-    combined_left = apply_photocuts_DESI(data_mag, galaxy_type)
-    
+    combined_left = apply_all_cuts(data_mag, galaxy_type, config, verbose=True)
+
     #other side
-    data_mag = lensing_func(data,  -1.*kappa, galaxy_type)
-    combined_right = apply_photocuts_DESI(data_mag, galaxy_type)
+    data_mag = lensing_func(data,  -1.*kappa, galaxy_type, config)
+    combined_right = apply_all_cuts(data_mag, galaxy_type, config, verbose=True)
     
     alpha, alpha_error = get_alpha(combined_left, combined_right, kappa, weights=weights)
     print("-------")
@@ -431,7 +419,7 @@ def calculate_alpha_simple_DESI(data, kappa, galaxy_type, lensing_func =apply_le
     return alpha, alpha_error
 
 #calculate alpha from multiple step sizes
-def calculate_alpha_DESI(data, kappas, galaxy_type, lensing_func =apply_lensing , weights_str="none"):  #, use_exp_profile=False
+def calculate_alpha_DESI(data, kappas, galaxy_type, config, lensing_func =apply_lensing , weights_str="none"):  #, use_exp_profile=False
     """Baseline magnification bias estimate with our binwise estimator for CMASS.
 
     Args:
@@ -467,12 +455,13 @@ def calculate_alpha_DESI(data, kappas, galaxy_type, lensing_func =apply_lensing 
         #print(kappa)
         #postivite kappa: increase #gal at faint end. 
         #convention: left-sided derivative on the faint end. So need a minus sign
-        data_mag = lensing_func(data,  kappa, galaxy_type)# use_exp_profile=use_exp_profile)
-        combined_left = apply_photocuts_DESI(data_mag, galaxy_type)
+        data_mag = lensing_func(data,  kappa, galaxy_type, config)# use_exp_profile=use_exp_profile)
+        combined_left = apply_all_cuts(data_mag, galaxy_type, config)
         
         #other side
-        data_mag = lensing_func(data,  -1.*kappa, galaxy_type)# use_exp_profile=use_exp_profile)
-        combined_right = apply_photocuts_DESI(data_mag, galaxy_type)
+        data_mag = lensing_func(data,  -1.*kappa, galaxy_type, config)# use_exp_profile=use_exp_profile)
+        combined_right = apply_all_cuts(data_mag, galaxy_type, config)
+
         
         lst_left.append(combined_left)
         lst_right.append(combined_right)
@@ -495,7 +484,7 @@ def calculate_alpha_DESI(data, kappas, galaxy_type, lensing_func =apply_lensing 
     result["As_error"] = dNs_bins_error*norm
 
     #getting the simple estimates for free
-    print("Not including R in the alpha simple estimate")
+    #print("Not including R in the alpha simple estimate")
     result["alpha_simple"] = (dNs[1:] / (N0 * 2* kappas[1:])) #+R_over2N0
     result["alpha_simple_error"] = dNs_error[1:] / (N0 * 2* kappas[1:])
     result["alpha_simple_error_full"] = np.sqrt((dNs_error[1:]**2 / (N0 * 2* kappas[1:])**2) + (result["alpha_simple"]**2/N0))

@@ -6,9 +6,9 @@ import fitsio
 
 def get_required_columns(galaxy_type):
     if galaxy_type[:3]=="BGS":
-        return ['TARGETID', 'PHOTSYS', 'RA', 'DEC', 'FLUX_G', 'FLUX_R', 'FLUX_Z', 'FLUX_W1', 'FLUX_IVAR_G', 'FLUX_IVAR_R', 'FLUX_IVAR_Z', 'FIBERFLUX_R', 'FIBERTOTFLUX_R', 'EBV', 'MASKBITS', 'NOBS_G', 'NOBS_R', 'NOBS_Z', 'SHAPE_R']
+        return ['TARGETID', 'PHOTSYS', 'RA', 'DEC', 'FLUX_G', 'FLUX_R', 'FLUX_Z', 'FLUX_W1', 'FLUX_IVAR_G', 'FLUX_IVAR_R', 'FLUX_IVAR_Z', 'FIBERFLUX_R', 'FIBERTOTFLUX_R', 'EBV', 'MASKBITS', 'NOBS_G', 'NOBS_R', 'NOBS_Z', 'SHAPE_R', 'TSNR2_BGS', 'ZWARN', 'DELTACHI2']
     elif galaxy_type[:3]=="LRG":
-        return ['TARGETID', 'PHOTSYS', 'RA', 'DEC', 'FLUX_G', 'FLUX_R', 'FLUX_Z', 'FLUX_W1', 'FLUX_IVAR_R', 'FLUX_IVAR_Z', 'FLUX_IVAR_W1', 'FIBERFLUX_Z', 'FIBERTOTFLUX_Z', 'EBV', 'MASKBITS', 'NOBS_G', 'NOBS_R', 'NOBS_Z', 'SHAPE_R']
+        return ['TARGETID', 'PHOTSYS', 'RA', 'DEC', 'FLUX_G', 'FLUX_R', 'FLUX_Z', 'FLUX_W1', 'FLUX_IVAR_R', 'FLUX_IVAR_Z', 'FLUX_IVAR_W1', 'FIBERFLUX_Z', 'FIBERTOTFLUX_Z', 'EBV', 'MASKBITS', 'NOBS_G', 'NOBS_R', 'NOBS_Z', 'SHAPE_R', 'TSNR2_ELG', 'ZWARN', 'DELTACHI2']
     else:
         raise NotImplementedError("galaxy_type {} not implemented".format(galaxy_type))
     
