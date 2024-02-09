@@ -10,11 +10,11 @@
 import numpy as np
 from istarget import get_required_columns
 from astropy.io import fits
-from astropy.table import Table,join
+from astropy.table import Table,join,hstack
 import os
 import fitsio
 from scipy.optimize import curve_fit
-from cuts import apply_photocuts_DESI,apply_magnitude_cuts,apply_secondary_cuts
+from cuts import apply_photocuts_DESI,apply_magnitude_cuts,apply_secondary_cuts,apply_photocuts_DESI_individual_cuts,apply_secondary_cuts_individual_cuts
 import json
 
 import copy
@@ -379,6 +379,16 @@ def apply_all_cuts(full_tab,galaxy_type,config, verbose = False):
         secondery_mask = np.ones(len(full_tab),dtype=bool)
     return selection_mask * magnitude_mask * secondery_mask
 
+def apply_all_cuts_individual_cuts(full_tab,galaxy_type,config,verbose=False):
+    masks_tab = apply_photocuts_DESI_individual_cuts(full_tab,galaxy_type)
+    masks_tab.add_column(apply_magnitude_cuts(full_tab,galaxy_type),name="absolute magnitude cuts")
+    if(config.getboolean("general","apply_cut_secondary_properties")):
+        masks_tab = hstack([masks_tab,apply_secondary_cuts_individual_cuts(full_tab,galaxy_type)],join_type="exact")
+        # if(verbose):
+            # print("Secondary properties remove {}/{} galaxies".format(np.sum(~secondery_mask), len(secondery_mask)))
+    return masks_tab
+
+
 
 #calculate alpha from a single step size
 def calculate_alpha_simple_DESI(data, kappa, galaxy_type, config, lensing_func =apply_lensing , weights_str="none"): 
@@ -417,6 +427,62 @@ def calculate_alpha_simple_DESI(data, kappa, galaxy_type, config, lensing_func =
     # print("R = {} (not added)".format(R))
 
     return alpha, alpha_error
+
+def calculate_alpha_simple_DESI_individual_cuts(data, kappa, galaxy_type, config, lensing_func =apply_lensing , weights_str="none"): 
+    """Function to calculate the simple estimate for alpha for survey X
+
+    Args:
+        data : galaxy data
+        kappa (float): kappa step size
+        lensing_func (func, optional): Function to apply lensing to the data. Defaults to apply_lensing_v3.
+        show_each_condition (bool, optional): Print out more details. Defaults to True.
+        weights_str (str, optional): Weights for each galaxy. Defaults to "baseline".
+
+    Returns:
+        float: simple alpha estimate
+        float: poisson error for alpha estimate
+    """
+    
+    #assuming kappa positive
+    weights = get_weights(weights_str, data, galaxy_type)
+    #postivite kappa: increase #gal at faint end. 
+    #convention: left-sided derivative on the faint end. So need minus sign
+    data_mag = lensing_func(data,  kappa, galaxy_type, config)
+    combined_left = apply_all_cuts_individual_cuts(data_mag, galaxy_type, config, verbose=True)
+
+    if(config.getboolean("individual_cuts","validate_individual_cuts")):
+        print("validating individual cuts left")
+        combined_left_validation = apply_all_cuts(data_mag, galaxy_type, config, verbose=True)
+        combined_left_sum = np.ones(len(combined_left),dtype=bool)
+        for key in combined_left.colnames:
+            combined_left_sum &= combined_left[key]
+        assert np.all(combined_left_sum == combined_left_validation), "Error: individual cuts do not match the combined cuts"
+
+    #other side
+    data_mag = lensing_func(data,  -1.*kappa, galaxy_type, config)
+    combined_right = apply_all_cuts_individual_cuts(data_mag, galaxy_type, config, verbose=True)
+    if(config.getboolean("individual_cuts","validate_individual_cuts")):
+        print("validating individual cuts right")
+        combined_right_validation = apply_all_cuts(data_mag, galaxy_type, config, verbose=True)
+        combined_right_sum = np.ones(len(combined_right),dtype=bool)
+        for key in combined_right.colnames:
+            combined_right_sum &= combined_right[key]
+        assert np.all(combined_right_sum == combined_right_validation), "Error: individual cuts do not match the combined cuts"
+    
+    result_dict = {}
+    n_gals = len(combined_left)
+    for col in combined_left.colnames:
+        alpha, alpha_error = get_alpha(combined_left[col], combined_right[col], kappa, weights=weights)
+        result_dict[col] = [alpha, alpha_error, n_gals-np.sum(combined_left[col]), n_gals-np.sum(combined_right[col]), n_gals]
+    print("-------")
+    print("Overall alpha = {}".format(result_dict))
+
+    #redshift failurs currently not considered
+    # R = magnification_bias_SDSS.get_R(data, use_exp_profile=use_exp_profile, case = "CMASS")
+    # print("R = {} (not added)".format(R))
+
+    return result_dict
+
 
 #calculate alpha from multiple step sizes
 def calculate_alpha_DESI(data, kappas, galaxy_type, config, lensing_func =apply_lensing , weights_str="none"):  #, use_exp_profile=False

@@ -1,5 +1,6 @@
 import numpy as np
-from istarget import select_lrg,select_bgs_bright
+from istarget import select_lrg,select_bgs_bright,select_lrg_individual_cuts,select_bgs_bright_individual_cuts
+from astropy.table import Table
 
 def get_redshift_bins(galaxy_type):
     if(galaxy_type == "LRG"):
@@ -75,10 +76,35 @@ def apply_photocuts_DESI(data, galaxy_type):
     selection_mask = np.zeros(len(data),dtype=bool)
     selection_mask[mask_north] = photoz_selection_north
     selection_mask[~mask_north] = photoz_selection_south
-    magnitude_mask = apply_magnitude_cuts(data,galaxy_type)
-    return (selection_mask & magnitude_mask)
+    return selection_mask
 
 def apply_secondary_cuts(data_cat,galaxy_type):
     mask = apply_tsnr_cut(data_cat,galaxy_type)
     mask &= select_good_redshifts(data_cat,galaxy_type)
     return mask
+
+def apply_photocuts_DESI_individual_cuts(data, galaxy_type):
+    if galaxy_type == "LRG":
+        selection_fnc = select_lrg_individual_cuts
+    elif galaxy_type == "BGS_BRIGHT":
+        selection_fnc = select_bgs_bright_individual_cuts
+    else:
+        raise ValueError(f"galaxy_type {galaxy_type} not recognized")
+    # split into north and south region, as selection function is different
+    mask_north = (data['PHOTSYS'] == 'N')
+    photoz_selection_tab_north = selection_fnc(data[mask_north],field='north')
+    photoz_selection_tab_south = selection_fnc(data[~mask_north],field='south')
+
+    selection_mask_tab = Table()
+    assert photoz_selection_tab_north.colnames == photoz_selection_tab_south.colnames
+    for col in photoz_selection_tab_north.colnames:
+        selection_mask_tab[col] = np.zeros(len(data),dtype=bool)
+        selection_mask_tab[col][mask_north] = photoz_selection_tab_north[col]
+        selection_mask_tab[col][~mask_north] = photoz_selection_tab_south[col]
+
+    return selection_mask_tab
+
+def apply_secondary_cuts_individual_cuts(data_cat,galaxy_type):
+    mask1 = apply_tsnr_cut(data_cat,galaxy_type)
+    mask2 = select_good_redshifts(data_cat,galaxy_type)
+    return Table([mask1,mask2],names=["tsnr_cut","deltachi2_cut"])

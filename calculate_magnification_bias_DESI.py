@@ -14,6 +14,8 @@ else:
 
 simple_alphas = {}
 alphas = {}
+if config.getboolean('general','apply_individual_cuts'):
+    alphas_individual_cuts = {}
 do_full_alpha_stepwise_calculation = True
 dkappa = 0.002
 kappas = np.arange(0, 0.03+dkappa, dkappa)
@@ -53,6 +55,11 @@ for galaxy_type in galaxy_types:
         simple_alphas_loc[i],simple_alphas_err_loc[i] = magnification_bias_DESI.calculate_alpha_simple_DESI(galcat, kappa=0.01, galaxy_type=galaxy_type, config=config, weights_str="none")
         print("alpha_simple = {} +- {}".format(simple_alphas_loc[i],simple_alphas_err_loc[i]))
 
+        if(config.getboolean('general','apply_individual_cuts')):
+            print("Applying individual cuts")
+            result_dict = magnification_bias_DESI.calculate_alpha_simple_DESI_individual_cuts(galcat, kappa=0.01, galaxy_type=galaxy_type, config=config, weights_str="none")
+            alphas_individual_cuts[galaxy_type+f"_{i}"] = result_dict
+
         if(do_full_alpha_stepwise_calculation):
             result = magnification_bias_DESI.calculate_alpha_DESI(galcat, kappas, galaxy_type=galaxy_type, config=config, weights_str="none")
             #print(result)
@@ -72,6 +79,18 @@ print(alphas)
 full_results = convert_numpy_arrays_to_lists({"simple_alphas":simple_alphas, "alphas":alphas})
 outpath = config['output']['output_path']
 out_fname = config['output']['output_filename']
+full_out_fname = out_fname.split('.')[0]+'_full.json'
 os.makedirs(outpath,exist_ok=True)
-with open(outpath+out_fname, 'w', encoding='utf-8') as outfile:
+with open(outpath+full_out_fname, 'w', encoding='utf-8') as outfile:
     json.dump(full_results, outfile, ensure_ascii=False, indent=4)
+
+relevant_results = {}
+for galaxy_type in galaxy_types:
+    relevant_results[galaxy_type] = {}
+    relevant_results[galaxy_type]['simple_alphas'] = simple_alphas[galaxy_type]
+    relevant_results[galaxy_type]['simple_alphas_error'] = simple_alphas[galaxy_type+'_error']
+    relevant_results[galaxy_type]['alphas'] = [alphas[galaxy_type][i]['fit']['alpha_fit'] for i in range(len(z_bins)-1)]
+    relevant_results[galaxy_type]['alphas_error'] = [alphas[galaxy_type][i]['fit']['alpha_fit_error'] for i in range(len(z_bins)-1)]
+
+with open(outpath+out_fname, 'w', encoding='utf-8') as outfile:
+    json.dump(relevant_results, outfile, ensure_ascii=False, indent=4)
