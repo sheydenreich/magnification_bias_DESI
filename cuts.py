@@ -35,8 +35,10 @@ def get_magnitude_mask(data_table,magnitude_cuts,lens_bins,mag_col="ABSMAG_RP0",
     mask_magnitudes[redshift_mask] = (data_table[mag_col][redshift_mask] < magnitude_cuts[lens_zbins[redshift_mask]])
     return mask_magnitudes
 
-def apply_magnitude_cuts(data_table,galaxy_type,mag_col="ABSMAG_RP0",zcol="Z"):
-    magnitude_cuts = get_magnitude_cuts(galaxy_type)
+def apply_magnitude_cuts(data_table,galaxy_type,config,mag_col="ABSMAG_RP0",zcol="Z"):
+    magnitude_cuts = config.get('general',f'absmag_cuts_{galaxy_type}',fallback=None)
+    if magnitude_cuts is not None:
+        magnitude_cuts = -1.*np.array([abs(float(x)) for x in magnitude_cuts.split(',')])
     lens_bins = get_redshift_bins(galaxy_type)
     mask_magnitudes = get_magnitude_mask(data_table,magnitude_cuts,lens_bins,mag_col=mag_col,zcol=zcol)
     return mask_magnitudes
