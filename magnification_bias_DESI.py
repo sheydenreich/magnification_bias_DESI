@@ -62,7 +62,7 @@ def load_survey_data(galaxy_type,config,zmin=None,zmax=None,debug=False):
     # apply the photometric cuts (it is necessary since a few galaxies do not pass the initial photo-z cuts)
     # I am not sure why that is. It is only ~10 galaxies though, so the error should be irrelevant
     selection_mask = apply_photocuts_DESI(full_tab,galaxy_type)
-    magnitude_mask = apply_magnitude_cuts(full_tab,galaxy_type)
+    magnitude_mask = apply_magnitude_cuts(full_tab,galaxy_type,config)
     secondery_mask = apply_secondary_cuts(full_tab,galaxy_type)
     if not np.all(secondery_mask):
         print("*"*50)
@@ -149,7 +149,7 @@ def apply_lensing(data,  kappa,  galaxy_type, config, verbose=False ):
 
 def apply_lensing_secondary_properties(data, fibermag_unmagnified, galaxy_type, config, verbose=False ):
     try:
-        with open(os.path.dirname(os.path.abspath(__file__))+os.sep+"results"+os.sep+"secondary_quantity_fits.json",'r') as f:
+        with open(os.path.dirname(os.path.abspath(__file__))+os.sep+"results"+os.sep+config["general"]["version"]+os.sep+"fit_results"+os.sep+"secondary_quantity_fits.json",'r') as f:
             fit_param_dict = json.load(f)
     except Exception as e:
         print("Error: {}".format(e))
@@ -370,7 +370,7 @@ def fit_linear(xdats, ydats, sigmas):
 
 def apply_all_cuts(full_tab,galaxy_type,config, verbose = False):
     selection_mask = apply_photocuts_DESI(full_tab,galaxy_type)
-    magnitude_mask = apply_magnitude_cuts(full_tab,galaxy_type)
+    magnitude_mask = apply_magnitude_cuts(full_tab,galaxy_type,config)
     if(config.getboolean("general","apply_cut_secondary_properties")):
         secondery_mask = apply_secondary_cuts(full_tab,galaxy_type)
         if(verbose):
@@ -381,7 +381,7 @@ def apply_all_cuts(full_tab,galaxy_type,config, verbose = False):
 
 def apply_all_cuts_individual_cuts(full_tab,galaxy_type,config,verbose=False):
     masks_tab = apply_photocuts_DESI_individual_cuts(full_tab,galaxy_type)
-    masks_tab.add_column(apply_magnitude_cuts(full_tab,galaxy_type),name="absolute magnitude cuts")
+    masks_tab.add_column(apply_magnitude_cuts(full_tab,galaxy_type,config),name="absolute magnitude cuts")
     if(config.getboolean("general","apply_cut_secondary_properties")):
         masks_tab = hstack([masks_tab,apply_secondary_cuts_individual_cuts(full_tab,galaxy_type)],join_type="exact")
         # if(verbose):
