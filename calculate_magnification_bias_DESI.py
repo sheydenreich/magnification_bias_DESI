@@ -26,9 +26,10 @@ simple_alphas = {}
 alphas = {}
 if config.getboolean('general','apply_individual_cuts'):
     alphas_individual_cuts = {}
-do_full_alpha_stepwise_calculation = False
-dkappa = 0.002
-kappas = np.arange(0, 0.03+dkappa, dkappa)
+do_full_alpha_stepwise_calculation = config.getboolean('general','do_full_alpha_stepwise_calculation')
+dkappa = config.getfloat('general','dkappa')
+dkappa_max = config.getfloat('general','dkappa_max')
+kappas = np.arange(0, dkappa_max+dkappa, dkappa)
 
 # def convert_numpy_arrays_to_lists(data):
 #     """
@@ -83,15 +84,15 @@ for galaxy_type in galaxy_types:
 print("simple alpha results")
 print(simple_alphas)
 
-outpath = config['output']['output_path']
+outpath = config['output']['output_path'] + config['general']['version'] + os.sep
 out_fname = config['output']['output_filename']
+os.makedirs(outpath,exist_ok=True)
 
 if(do_full_alpha_stepwise_calculation):
     print("full results")
     print(alphas)
     full_results = {"simple_alphas":simple_alphas, "alphas":alphas}
     full_out_fname = out_fname.split('.')[0]+'_full.json'
-    os.makedirs(outpath,exist_ok=True)
     with open(outpath+full_out_fname, 'w', encoding='utf-8') as outfile:
         json.dump(full_results, outfile, ensure_ascii=False, indent=4, cls=NpEncoder)
 
