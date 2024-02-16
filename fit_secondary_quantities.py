@@ -39,7 +39,7 @@ def fit_secondary_quantities(config):
     # some imports and definitions for the consistency plots
     import matplotlib.pyplot as plt
 
-    plots_path = os.path.dirname(os.path.abspath(__file__))+os.sep+"validation_plots"+os.sep
+    plots_path = os.path.dirname(os.path.abspath(__file__))+os.sep+"results"+os.sep+config["general"]["version"]+os.sep+"validation_plots"+os.sep
 
 
     galaxy_types = config['general']['galaxy_types'].strip().split(',')
@@ -60,7 +60,7 @@ def fit_secondary_quantities(config):
         
         # cut to the galaxy sample that is relevant for us
         # IMPORTANT: We do not apply the secondary cuts here, as they would otherwise bias the power-law fits
-        magnitude_mask = apply_magnitude_cuts(lss_tab, galaxy_type, mag_col="ABSMAG01_SDSS_R", zcol="Z_not4clus")
+        magnitude_mask = apply_magnitude_cuts(lss_tab, galaxy_type, config, mag_col="ABSMAG01_SDSS_R", zcol="Z_not4clus")
         lss_tab = lss_tab[magnitude_mask]
 
         fit_xval = config['secondary_properties'][f"Xval_{galaxy_type}"]
@@ -71,6 +71,14 @@ def fit_secondary_quantities(config):
 
             xdata = lss_tab[fit_xval][mask]
             ydata = lss_tab[fit_yval][mask]
+
+            mask = (xdata > 0) & (ydata > 0)
+            if not np.all(mask):
+                print(f"Warning: {np.sum(~mask)} of {len(mask)} points are not positive, so they are not considered.")
+
+            xdata = xdata[mask]
+            ydata = ydata[mask]
+
             params = fit_power_law(xdata,ydata)
 
             print(f"Fitted Parameters for {galaxy_type}, {fit_xval} x {fit_yval}: {params}")
@@ -92,8 +100,8 @@ def fit_secondary_quantities(config):
             plt.close()
 
             secondary_quantity_dict[f"{galaxy_type}_{fit_xval}_{fit_yval}"] = list(params)
-    os.makedirs(os.path.dirname(os.path.abspath(__file__))+os.sep+"results"+os.sep,exist_ok=True)
-    with open(os.path.dirname(os.path.abspath(__file__))+os.sep+"results"+os.sep+"secondary_quantity_fits.json", 'w', encoding='utf-8') as f:
+    os.makedirs(os.path.dirname(os.path.abspath(__file__))+os.sep+"results"+os.sep+config["general"]["version"]+os.sep+"fit_results"+os.sep,exist_ok=True)
+    with open(os.path.dirname(os.path.abspath(__file__))+os.sep+"results"+os.sep+config["general"]["version"]+os.sep+"fit_results"+os.sep+"secondary_quantity_fits.json", 'w', encoding='utf-8') as f:
         json.dump(secondary_quantity_dict,f, ensure_ascii=False, indent=4)
 
 
