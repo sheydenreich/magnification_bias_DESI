@@ -84,9 +84,7 @@ def apply_lensing(data,  kappa,  galaxy_type, config, verbose=False ):
     Returns:
         data: copy of galaxy data with extra columns for lensed magnitudes named ..._mag
     """
-    #TODO test if this works for the data_mag object. Want to copy it instead of overwriting the values
-    #having seperate columns for the magnified fluxes would be more memory efficient but that would requires significant
-    #changes in istarget.py
+
     data_mag = copy.deepcopy(data)
 
     #note FLUX_IVAR_* are all only compared to >0. That can't be affected by lensing therefore can ignore
@@ -126,7 +124,17 @@ def apply_lensing(data,  kappa,  galaxy_type, config, verbose=False ):
     #fiber correction
     theta_e_galaxies = np.sqrt(data_mag["SHAPE_R"]**2+1) # half light radius in arcsec ## SDSS: data_local['R_DEV'] *  0.396 #convert pixel to arcsec
     theta_e_arr = np.arange(0.05, 10, 0.01)
-    cor_for_2fiber_mag_arr = [get_cor_for_1p5fiber_mag(theta_e=i, use_exp_profile=False) for i in theta_e_arr]
+    fiber_mag_lensing = config['general']['fiber_mag_lensing']
+    if(fiber_mag_lensing == "DeVaucouleurs_profile"):
+        cor_for_2fiber_mag_arr = [get_cor_for_1p5fiber_mag(theta_e=i, use_exp_profile=False) for i in theta_e_arr]
+    elif(fiber_mag_lensing == "Exponential_profile"):
+        cor_for_2fiber_mag_arr = [get_cor_for_1p5fiber_mag(theta_e=i, use_exp_profile=True) for i in theta_e_arr]
+    elif(fiber_mag_lensing == "no_correction"):
+        cor_for_2fiber_mag_arr = [0. for i in theta_e_arr]
+    else:
+        raise ValueError(f"fiber_mag_lensing {fiber_mag_lensing} not recognized")
+
+    
     fiber_correction = np.interp(theta_e_galaxies, theta_e_arr, cor_for_2fiber_mag_arr)
     #SDSS: data_local["fiber2Flux_mag"] = data_local["FIBER2FLUX"] * (1. +(2.- fiber_correction)*kappa)
     
