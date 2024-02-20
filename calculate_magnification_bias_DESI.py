@@ -6,6 +6,16 @@ import numpy as np
 import json
 import os
 
+class NpEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super(NpEncoder, self).default(obj)
+    
 config = configparser.ConfigParser()
 if len(sys.argv) > 1:
     config.read(sys.argv[1])
@@ -14,25 +24,28 @@ else:
 
 simple_alphas = {}
 alphas = {}
-do_full_alpha_stepwise_calculation = True
-dkappa = 0.002
-kappas = np.arange(0, 0.03+dkappa, dkappa)
+if config.getboolean('general','apply_individual_cuts'):
+    alphas_individual_cuts = {}
+do_full_alpha_stepwise_calculation = config.getboolean('general','do_full_alpha_stepwise_calculation')
+dkappa = config.getfloat('general','dkappa')
+dkappa_max = config.getfloat('general','dkappa_max')
+kappas = np.arange(0, dkappa_max+dkappa, dkappa)
 
-def convert_numpy_arrays_to_lists(data):
-    """
-    Recursively convert numpy arrays in a nested dictionary to lists.
+# def convert_numpy_arrays_to_lists(data):
+#     """
+#     Recursively convert numpy arrays in a nested dictionary to lists.
     
-    :param data: The dictionary to convert.
-    :return: A new dictionary with numpy arrays converted to lists.
-    """
-    if isinstance(data, dict):
-        return {k: convert_numpy_arrays_to_lists(v) for k, v in data.items()}
-    elif isinstance(data, np.ndarray):
-        return data.tolist()
-    elif isinstance(data, list):
-        return [convert_numpy_arrays_to_lists(item) for item in data]
-    else:
-        return data
+#     :param data: The dictionary to convert.
+#     :return: A new dictionary with numpy arrays converted to lists.
+#     """
+#     if isinstance(data, dict):
+#         return {k: convert_numpy_arrays_to_lists(v) for k, v in data.items()}
+#     elif isinstance(data, np.ndarray):
+#         return data.tolist()
+#     elif isinstance(data, list):
+#         return [convert_numpy_arrays_to_lists(item) for item in data]
+#     else:
+#         return data
 
 galaxy_types = config['general']['galaxy_types'].strip().split(',')
 for galaxy_type in galaxy_types:
@@ -53,6 +66,11 @@ for galaxy_type in galaxy_types:
         simple_alphas_loc[i],simple_alphas_err_loc[i] = magnification_bias_DESI.calculate_alpha_simple_DESI(galcat, kappa=0.01, galaxy_type=galaxy_type, config=config, weights_str="none")
         print("alpha_simple = {} +- {}".format(simple_alphas_loc[i],simple_alphas_err_loc[i]))
 
+        if(config.getboolean('general','apply_individual_cuts')):
+            print("Applying individual cuts")
+            result_dict = magnification_bias_DESI.calculate_alpha_simple_DESI_individual_cuts(galcat, kappa=0.01, galaxy_type=galaxy_type, config=config, weights_str="none")
+            alphas_individual_cuts[f"{galaxy_type}_{i}"] = result_dict
+
         if(do_full_alpha_stepwise_calculation):
             result = magnification_bias_DESI.calculate_alpha_DESI(galcat, kappas, galaxy_type=galaxy_type, config=config, weights_str="none")
             #print(result)
@@ -66,12 +84,35 @@ for galaxy_type in galaxy_types:
 print("simple alpha results")
 print(simple_alphas)
 
-print("full results")
-print(alphas)
-
-full_results = convert_numpy_arrays_to_lists({"simple_alphas":simple_alphas, "alphas":alphas})
-outpath = config['output']['output_path']
+outpath = config['output']['output_path'] + config['general']['version'] + os.sep
 out_fname = config['output']['output_filename']
 os.makedirs(outpath,exist_ok=True)
-with open(outpath+out_fname, 'w', encoding='utf-8') as outfile:
-    json.dump(full_results, outfile, ensure_ascii=False, indent=4)
+
+if(do_full_alpha_stepwise_calculation):
+    print("full results")
+    print(alphas)
+    full_results = {"simple_alphas":simple_alphas, "alphas":alphas}
+    full_out_fname = out_fname.split('.')[0]+'_full.json'
+    with open(outpath+full_out_fname, 'w', encoding='utf-8') as outfile:
+        json.dump(full_results, outfile, ensure_ascii=False, indent=4, cls=NpEncoder)
+
+    relevant_results = {}
+    for galaxy_type in galaxy_types:
+        relevant_results[galaxy_type] = {}
+        relevant_results[galaxy_type]['simple_alphas'] = simple_alphas[galaxy_type]
+        relevant_results[galaxy_type]['simple_alphas_error'] = simple_alphas[galaxy_type+'_error']
+        relevant_results[galaxy_type]['alphas'] = [alphas[galaxy_type][i]['fit']['alpha_fit'] for i in range(len(z_bins)-1)]
+        relevant_results[galaxy_type]['alphas_error'] = [alphas[galaxy_type][i]['fit']['alpha_fit_error'] for i in range(len(z_bins)-1)]
+
+    with open(outpath+out_fname, 'w', encoding='utf-8') as outfile:
+        json.dump(relevant_results, outfile, ensure_ascii=False, indent=4, cls=NpEncoder)
+
+else:
+    simple_alphas_fname = out_fname.split('.')[0]+'_simple.json'
+    with open(outpath+simple_alphas_fname, 'w', encoding='utf-8') as outfile:
+        json.dump(simple_alphas, outfile, ensure_ascii=False, indent=4, cls=NpEncoder)
+
+if(config.getboolean('general','apply_individual_cuts')):
+    individual_cuts_out_fname = out_fname.split('.')[0]+'_individual_cuts.json'
+    with open(outpath+individual_cuts_out_fname, 'w', encoding='utf-8') as outfile:
+        json.dump(alphas_individual_cuts, outfile, ensure_ascii=False, indent=4, cls=NpEncoder)
