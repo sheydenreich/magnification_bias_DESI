@@ -26,16 +26,19 @@ def create_redshift_mask(reference_redshifts,z_bins_lens):
         return redshift_mask
 
 
-def get_magnitude_mask(data_table,magnitude_cuts,lens_bins,mag_col="ABSMAG_RP0",zcol="Z"):
+def get_magnitude_mask(data_table,magnitude_cuts,lens_bins,mag_col="ABSMAG01_SDSS_R",zcol="Z"):
     if magnitude_cuts is None:
         return np.ones(len(data_table),dtype=bool)
     redshift_mask = create_redshift_mask(data_table[zcol],lens_bins)
     lens_zbins = (np.digitize(data_table[zcol],lens_bins)-1).astype(int)
     mask_magnitudes = np.zeros(len(data_table),dtype=bool)
-    mask_magnitudes[redshift_mask] = (data_table[mag_col][redshift_mask] < magnitude_cuts[lens_zbins[redshift_mask]])
+    
+    effective_magnitudes = data_table[mag_col] + 0.97 * data_table[zcol] - 0.095
+
+    mask_magnitudes[redshift_mask] = (effective_magnitudes[redshift_mask] < magnitude_cuts[lens_zbins[redshift_mask]])
     return mask_magnitudes
 
-def apply_magnitude_cuts(data_table,galaxy_type,config,mag_col="ABSMAG_RP0",zcol="Z"):
+def apply_magnitude_cuts(data_table,galaxy_type,config,mag_col="ABSMAG01_SDSS_R",zcol="Z"):
     magnitude_cuts = config.get('general',f'absmag_cuts_{galaxy_type}',fallback=None)
     if magnitude_cuts is not None:
         magnitude_cuts = -1.*np.array([abs(float(x)) for x in magnitude_cuts.split(',')])
