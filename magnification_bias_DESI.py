@@ -32,7 +32,7 @@ def load_survey_data(galaxy_type,config,zmin=None,zmax=None,debug=False):
     load_columns = ["TARGETID","Z"] + required_columns
     if galaxy_type == "BGS_BRIGHT":
         load_columns += ["ABSMAG01_SDSS_R"]
-    gal_tab = Table(fitsio.read(fpath_gal+os.sep+version+os.sep+f"{galaxy_type}_clustering.dat.fits",columns=load_columns))
+    gal_tab = read_table(fpath_gal+os.sep+version+os.sep+f"{galaxy_type}_clustering.dat.fits",columns=load_columns)
 
     # apply the redshift cuts
     mask_zbins = np.ones(len(gal_tab),dtype=bool)
@@ -83,7 +83,7 @@ def apply_lensing(data,  kappa,  galaxy_type, config, verbose=False ):
     #absolute magnitude for BGS
     if(galaxy_type == "BGS_BRIGHT"):
         #absolute mag calculation commutes with additive change in the aparent magnitude calculation
-        data_mag["ABSMAG_RP0"] += - 2.5 * np.log10(1.+2.*kappa)
+        data_mag["ABSMAG01_SDSS_R"] += - 2.5 * np.log10(1.+2.*kappa)
         #sign: for positive kappa galaxy gets brighter -> aparent magnitude gets smaller
 
 
