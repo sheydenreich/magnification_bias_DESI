@@ -19,6 +19,8 @@ import json
 
 import copy
 
+from load_DESI_catalogues import read_table
+
 def load_survey_data(galaxy_type,config,zmin=None,zmax=None,debug=False):
     fpath_lss = config['general']['full_lss_path']
     fpath_gal = config['general']['lensing_path']
@@ -26,50 +28,31 @@ def load_survey_data(galaxy_type,config,zmin=None,zmax=None,debug=False):
 
     required_columns = get_required_columns(galaxy_type)
 
-    # load the LSS catalogue with all the columns we need
-    lss_tab = Table(fitsio.read(fpath_lss+os.sep+version+os.sep+f"{galaxy_type}_full_HPmapcut.dat.fits",columns=required_columns))
-    
     # load our catalogue that contains the clean sample
-    load_columns = ["TARGETID","Z"]
+    load_columns = ["TARGETID","Z"] + required_columns
     if galaxy_type == "BGS_BRIGHT":
-        load_columns += ["ABSMAG_RP0"]
-    gal_tab = Table(fitsio.read(fpath_gal+os.sep+version+os.sep+f"{galaxy_type}_full.dat.fits",columns=load_columns))
-
-    if(debug):
-        # Extract TARGETID columns
-        targetids_gal_tab = set(gal_tab['TARGETID'])
-        targetids_lss_tab = set(lss_tab['TARGETID'])
-
-        # Check if every TARGETID in gal_tab is in lss_tab
-        missing_targetids = targetids_gal_tab - targetids_lss_tab
-
-        if missing_targetids:
-            print(f"Missing TARGETID(s) in lss_tab: {missing_targetids}")
-        else:
-            print("All TARGETID(s) in gal_tab are present in lss_tab")
-
-    # cut the full LSS catalogue to the clean sample
-    full_tab = join(gal_tab,lss_tab,keys='TARGETID',join_type='left')
+        load_columns += ["ABSMAG01_SDSS_R"]
+    gal_tab = read_table(fpath_gal+os.sep+version+os.sep+f"{galaxy_type}_clustering.dat.fits",columns=load_columns)
 
     # apply the redshift cuts
-    mask_zbins = np.ones(len(full_tab),dtype=bool)
+    mask_zbins = np.ones(len(gal_tab),dtype=bool)
     if zmin is not None:
-        mask_zbins &= (full_tab['Z'] >= zmin)
+        mask_zbins &= (gal_tab['Z'] >= zmin)
     if zmax is not None:
-        mask_zbins &= (full_tab['Z'] < zmax)
-    full_tab = full_tab[mask_zbins]
+        mask_zbins &= (gal_tab['Z'] < zmax)
+    gal_tab = gal_tab[mask_zbins]
     
     # apply the photometric cuts (it is necessary since a few galaxies do not pass the initial photo-z cuts)
     # I am not sure why that is. It is only ~10 galaxies though, so the error should be irrelevant
-    selection_mask = apply_photocuts_DESI(full_tab,galaxy_type)
-    magnitude_mask = apply_magnitude_cuts(full_tab,galaxy_type,config)
-    secondery_mask = apply_secondary_cuts(full_tab,galaxy_type)
+    selection_mask = apply_photocuts_DESI(gal_tab,galaxy_type)
+    magnitude_mask = apply_magnitude_cuts(gal_tab,galaxy_type,config)
+    secondery_mask = apply_secondary_cuts(gal_tab,galaxy_type)
     if not np.all(secondery_mask):
         print("*"*50)
         raise ValueError(f"Secondary properties remove {np.sum(~secondery_mask)} galaxies! This should not happen.")
 
-    print(f"Loaded {len(full_tab)} {galaxy_type} galaxies, {len(full_tab)-np.sum(selection_mask & magnitude_mask)} did not pass the photometric cuts")
-    return full_tab[selection_mask & magnitude_mask]
+    print(f"Loaded {len(gal_tab)} {galaxy_type} galaxies, {len(gal_tab)-np.sum(selection_mask & magnitude_mask)} did not pass the photometric cuts")
+    return gal_tab[selection_mask & magnitude_mask]
 
 
 
@@ -100,7 +83,7 @@ def apply_lensing(data,  kappa,  galaxy_type, config, verbose=False ):
     #absolute magnitude for BGS
     if(galaxy_type == "BGS_BRIGHT"):
         #absolute mag calculation commutes with additive change in the aparent magnitude calculation
-        data_mag["ABSMAG_RP0"] += - 2.5 * np.log10(1.+2.*kappa)
+        data_mag["ABSMAG01_SDSS_R"] += - 2.5 * np.log10(1.+2.*kappa)
         #sign: for positive kappa galaxy gets brighter -> aparent magnitude gets smaller
 
 

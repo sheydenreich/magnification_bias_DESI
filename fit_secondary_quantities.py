@@ -6,6 +6,7 @@ import fitsio
 import os
 import json
 
+from load_DESI_catalogues import read_table
 
 def power_law(x, a, b):
     return a * np.power(x, b)
@@ -56,7 +57,7 @@ def fit_secondary_quantities(config):
             required_columns += ["Z_not4clus","ABSMAG01_SDSS_R"]
 
         # load the LSS catalogue with all the columns we need
-        lss_tab = Table(fitsio.read(fpath_lss+os.sep+version+os.sep+f"{galaxy_type}_full_HPmapcut.dat.fits",columns=required_columns))
+        lss_tab = read_table(fpath_lss+os.sep+version+os.sep+f"{galaxy_type}_full_HPmapcut.dat.fits",columns=required_columns)
         
         # cut to the galaxy sample that is relevant for us
         # IMPORTANT: We do not apply the secondary cuts here, as they would otherwise bias the power-law fits
