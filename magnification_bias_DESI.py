@@ -23,7 +23,8 @@ from load_DESI_catalogues import read_table
 
 def load_survey_data(galaxy_type,config,zmin=None,zmax=None,debug=False):
     fpath_lss = config['general']['full_lss_path']
-    fpath_gal = config['general']['lensing_path']
+    # fpath_gal = config['general']['lensing_path']
+    fpath_gal = fpath_lss
     version = config['general']['version']
 
     required_columns = get_required_columns(galaxy_type)
@@ -97,6 +98,9 @@ def apply_lensing(data,  kappa,  galaxy_type, config, verbose=False ):
     elif(galaxy_type == "BGS_BRIGHT"):
         fiber_column = "FIBERFLUX_R"
         fiber_tot_column = "FIBERTOTFLUX_R"
+    elif(galaxy_type == "ELG_LOPnotqso"):
+        fiber_column = "FIBERFLUX_G"
+        fiber_tot_column = "FIBERTOTFLUX_G"
     else:
         raise ValueError(f"galaxy_type {galaxy_type} not recognized")
     
