@@ -10,12 +10,16 @@
 import numpy as np
 from istarget import get_required_columns
 from astropy.io import fits
-from astropy.table import Table,join,hstack
+from astropy.table import Table,join,hstack,vstack
 import os
 import fitsio
 from scipy.optimize import curve_fit
 from cuts import apply_photocuts_DESI,apply_magnitude_cuts,apply_secondary_cuts,apply_photocuts_DESI_individual_cuts,apply_secondary_cuts_individual_cuts
 import json
+from scipy.interpolate import RectBivariateSpline
+from scipy.interpolate import NearestNDInterpolator
+
+
 
 import copy
 
@@ -30,9 +34,18 @@ def load_survey_data(galaxy_type,config,zmin=None,zmax=None,debug=False):
 
     # load our catalogue that contains the clean sample
     load_columns = ["TARGETID","Z"] + required_columns
-    if galaxy_type == "BGS_BRIGHT":
+    if (galaxy_type == "BGS_BRIGHT") and ('Y1' in fpath_lss):
         load_columns += ["ABSMAG01_SDSS_R"]
-    gal_tab = read_table(fpath_gal+os.sep+version+os.sep+f"{galaxy_type}_clustering.dat.fits",columns=load_columns)
+    if config['general']['fiber_mag_lensing'] == 'Tabulated':
+        tabulatedbool=True
+    else:
+        tabulatedbool=False
+    if "DA2" in config['general']['full_lss_path']:
+        gal_tab = read_table(fpath_gal+os.sep+version+os.sep+"nonKP/"+f"{galaxy_type}_clustering.dat.fits",columns=load_columns,tabulatedbool=tabulatedbool)
+    else:
+        gal_tab = read_table(fpath_gal+os.sep+version+os.sep+f"{galaxy_type}_clustering.dat.fits",columns=load_columns,tabulatedbool=tabulatedbool)
+    #gal_tab_SGC = read_table(fpath_gal+os.sep+version+os.sep+f"{galaxy_type}_SGC_clustering.dat.fits",columns=load_columns)
+    #gal_tab = vstack((gal_tab_NGC, gal_tab_SGC))
 
     # apply the redshift cuts
     mask_zbins = np.ones(len(gal_tab),dtype=bool)
@@ -83,7 +96,8 @@ def apply_lensing(data,  kappa,  galaxy_type, config, verbose=False ):
     #absolute magnitude for BGS
     if(galaxy_type == "BGS_BRIGHT"):
         #absolute mag calculation commutes with additive change in the aparent magnitude calculation
-        data_mag["ABSMAG01_SDSS_R"] += - 2.5 * np.log10(1.+2.*kappa)
+        if "DA2" not in config["general"]["full_lss_path"]:
+            data_mag["ABSMAG01_SDSS_R"] += - 2.5 * np.log10(1.+2.*kappa)
         #sign: for positive kappa galaxy gets brighter -> aparent magnitude gets smaller
 
 
@@ -97,15 +111,18 @@ def apply_lensing(data,  kappa,  galaxy_type, config, verbose=False ):
     elif(galaxy_type == "BGS_BRIGHT"):
         fiber_column = "FIBERFLUX_R"
         fiber_tot_column = "FIBERTOTFLUX_R"
+    elif(galaxy_type == 'ELG_LOPnotqso'):
+        fiber_column = "FIBERFLUX_G"
     else:
         raise ValueError(f"galaxy_type {galaxy_type} not recognized")
     
     #only magnifying the galaxy not the surrounding light considered for FIBERTOTFLUX
-    diff_fibertot_fiber = data_mag[fiber_tot_column] - data_mag[fiber_column]
+    if galaxy_type != 'ELG_LOPnotqso':
+        diff_fibertot_fiber = data_mag[fiber_tot_column] - data_mag[fiber_column]
 
 
     #fiber correction
-    theta_e_galaxies = np.sqrt(data_mag["SHAPE_R"]**2+1) # half light radius in arcsec ## SDSS: data_local['R_DEV'] *  0.396 #convert pixel to arcsec
+    theta_e_galaxies = np.sqrt(data_mag["SHAPE_R"]**2 + 1) # half light radius in arcsec ## SDSS: data_local['R_DEV'] *  0.396 #convert pixel to arcsec
     theta_e_arr = np.arange(0.05, 10, 0.01)
     fiber_mag_lensing = config['general']['fiber_mag_lensing']
     if(fiber_mag_lensing == "DeVaucouleurs_profile"):
@@ -114,12 +131,42 @@ def apply_lensing(data,  kappa,  galaxy_type, config, verbose=False ):
         cor_for_2fiber_mag_arr = [get_cor_for_1p5fiber_mag(theta_e=i, use_exp_profile=True) for i in theta_e_arr]
     elif(fiber_mag_lensing == "no_correction"):
         cor_for_2fiber_mag_arr = [0. for i in theta_e_arr]
+    elif (fiber_mag_lensing == 'Tabulated'):
+        fiber_correction = np.zeros_like(theta_e_galaxies)
+        #fiber_correction = np.ones(len(cat['RA_1']))
+        morphtypes = ['REX','DEV','EXP','SER','PSF']
+        for morphtype in morphtypes:
+            cat_sel = data_mag['MORPHTYPE'] == morphtype
+            if morphtype == 'REX':
+                dat = np.load('/global/cfs/cdirs/desi/users/akrolew/galaxy_fiber_info_files_rongpu/rex.npz')
+                fiber_correction[cat_sel] = np.interp(data_mag[cat_sel]['SHAPE_R'], dat['shape_r'], dat['f_factor'])
+            elif morphtype == 'DEV':
+                dat = np.load('/global/cfs/cdirs/desi/users/akrolew/galaxy_fiber_info_files_rongpu/dev_fiber_factor.npz')
+                spl = NearestNDInterpolator((dat['shape_r'],dat['q']),dat['f_factor'])
+                fiber_correction[cat_sel] = spl((data_mag[cat_sel]['SHAPE_R'], data_mag[cat_sel]['AXIS_RATIO']))
+            elif morphtype == 'EXP':
+                dat = np.load('/global/cfs/cdirs/desi/users/akrolew/galaxy_fiber_info_files_rongpu/exp_fiber_factor.npz')
+                spl = NearestNDInterpolator((dat['shape_r'],dat['q']),dat['f_factor'])
+                fiber_correction[cat_sel] = spl((data_mag[cat_sel]['SHAPE_R'], data_mag[cat_sel]['AXIS_RATIO']))
+            elif morphtype == 'SER':
+                #if sersic >= 2.5:
+                dat1 = np.load('/global/cfs/cdirs/desi/users/akrolew/galaxy_fiber_info_files_rongpu/dev_fiber_factor.npz')
+                spl1 = NearestNDInterpolator((dat1['shape_r'],dat1['q']),dat1['f_factor'])
+                dat2 = np.load('/global/cfs/cdirs/desi/users/akrolew/galaxy_fiber_info_files_rongpu/exp_fiber_factor.npz')
+                spl2 = NearestNDInterpolator((dat2['shape_r'],dat2['q']),dat2['f_factor'])
+
+                fiber_correction[cat_sel & (data_mag['SERSIC'] >= 2.5)] = spl((data_mag[cat_sel & (data_mag['SERSIC'] >= 2.5)]['SHAPE_R'], data_mag['AXIS_RATIO'][cat_sel & (data_mag['SERSIC'] >= 2.5)]))
+                #else:
+                fiber_correction[cat_sel & (data_mag['SERSIC'] < 2.5)] = spl((data_mag[cat_sel & (data_mag['SERSIC'] < 2.5)]['SHAPE_R'], data_mag['AXIS_RATIO'][cat_sel & (data_mag['SERSIC'] < 2.5)])	)
+            elif morphtype == 'PSF':
+                fiber_correction[cat_sel] = 1
+
     else:
         raise ValueError(f"fiber_mag_lensing {fiber_mag_lensing} not recognized")
 
+    if (fiber_mag_lensing != 'Tabulated'):
+        fiber_correction = np.interp(theta_e_galaxies, theta_e_arr, cor_for_2fiber_mag_arr)
     
-    fiber_correction = np.interp(theta_e_galaxies, theta_e_arr, cor_for_2fiber_mag_arr)
-    #SDSS: data_local["fiber2Flux_mag"] = data_local["FIBER2FLUX"] * (1. +(2.- fiber_correction)*kappa)
     
     # to lens secondary properties we need difference between unmagnified and magnified fiber flux
     if(config.getboolean("general","apply_cut_secondary_properties")):
@@ -128,7 +175,8 @@ def apply_lensing(data,  kappa,  galaxy_type, config, verbose=False ):
 
     # lensing the fiber fluxes
     data_mag[fiber_column] *= (1. +(2.- fiber_correction)*kappa)
-    data_mag[fiber_tot_column] =  diff_fibertot_fiber + data_mag[fiber_column]
+    if galaxy_type != 'ELG_LOPnotqso':
+        data_mag[fiber_tot_column] =  diff_fibertot_fiber + data_mag[fiber_column]
 
     #lensing the secondary properties
     if(config.getboolean("general","apply_cut_secondary_properties")):
@@ -158,7 +206,12 @@ def apply_lensing_secondary_properties(data, fibermag_unmagnified, galaxy_type, 
 
 def get_weights(weights_str, data, galaxy_type):
     #implement the weights used for your galaxy survey. We used a string to switch between options but you can of course change that convention
-    weights = None 
+    if weights_str == 'none':
+        weights = None
+    elif weights_str == 'weight_FKP':
+        weights = data['WEIGHT']*data['WEIGHT_FKP']
+    elif weights_str == 'weight':
+        weights = data['WEIGHT']
     return weights
 
 
@@ -402,12 +455,24 @@ def calculate_alpha_simple_DESI(data, kappa, galaxy_type, config, lensing_func =
     #postivite kappa: increase #gal at faint end. 
     #convention: left-sided derivative on the faint end. So need minus sign
     data_mag = lensing_func(data,  kappa, galaxy_type, config)
+    #print(5/0)
 
     combined_left = apply_all_cuts(data_mag, galaxy_type, config, verbose=True)
+    
+    print('sum of weights',np.sum(weights))
+    print('kappa',kappa)
+    print('Len of data_mag',np.shape(data_mag))
+    print('Total combined_left',np.sum(combined_left))
+    print('Sum of weights left',np.sum(weights[combined_left]))
 
     #other side
     data_mag = lensing_func(data,  -1.*kappa, galaxy_type, config)
     combined_right = apply_all_cuts(data_mag, galaxy_type, config, verbose=True)
+    
+    print('Total combined_right',np.sum(combined_right))
+    print('Sum of weights right',np.sum(weights[combined_right]))
+
+
     
     alpha, alpha_error = get_alpha(combined_left, combined_right, kappa, weights=weights)
     print("-------")

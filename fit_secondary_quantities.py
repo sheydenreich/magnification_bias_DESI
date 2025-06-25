@@ -74,13 +74,18 @@ def fit_secondary_quantities(config):
             ydata = lss_tab[fit_yval][mask]
 
             mask = (xdata > 0) & (ydata > 0)
+
             if not np.all(mask):
                 print(f"Warning: {np.sum(~mask)} of {len(mask)} points are not positive, so they are not considered.")
+                #print(5/0)
 
             xdata = xdata[mask]
             ydata = ydata[mask]
 
-            params = fit_power_law(xdata,ydata)
+            if galaxy_type[:3] == 'ELG':  # Fit for ELG seems to get thrown off by points with low o2c
+                params = fit_power_law(xdata[ydata > 0.9],ydata[ydata > 0.9])
+            else:
+                params = fit_power_law(xdata,ydata)
 
             print(f"Fitted Parameters for {galaxy_type}, {fit_xval} x {fit_yval}: {params}")
 
@@ -104,6 +109,7 @@ def fit_secondary_quantities(config):
     os.makedirs(os.path.dirname(os.path.abspath(__file__))+os.sep+"results"+os.sep+config["general"]["version"]+os.sep+"fit_results"+os.sep,exist_ok=True)
     with open(os.path.dirname(os.path.abspath(__file__))+os.sep+"results"+os.sep+config["general"]["version"]+os.sep+"fit_results"+os.sep+"secondary_quantity_fits.json", 'w', encoding='utf-8') as f:
         json.dump(secondary_quantity_dict,f, ensure_ascii=False, indent=4)
+    #print(5/0)
 
 
 if __name__ == "__main__":

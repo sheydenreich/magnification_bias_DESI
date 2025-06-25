@@ -2,13 +2,17 @@ from __future__ import division, print_function
 import sys, os, glob, time, warnings, gc
 import numpy as np
 from astropy.table import Table, vstack
+from desitarget.cuts import isQSO_randomforest
 import fitsio
 
 def get_required_columns(galaxy_type):
     if galaxy_type[:3]=="BGS":
-        return ['TARGETID', 'PHOTSYS', 'RA', 'DEC', 'FLUX_G', 'FLUX_R', 'FLUX_Z', 'FLUX_W1', 'FLUX_IVAR_G', 'FLUX_IVAR_R', 'FLUX_IVAR_Z', 'FIBERFLUX_R', 'FIBERTOTFLUX_R', 'EBV', 'MASKBITS', 'NOBS_G', 'NOBS_R', 'NOBS_Z', 'SHAPE_R', 'TSNR2_BGS', 'ZWARN', 'DELTACHI2']
+        return ['TARGETID', 'PHOTSYS', 'RA', 'DEC', 'FLUX_G', 'FLUX_R', 'FLUX_Z', 'FLUX_W1', 'FLUX_IVAR_G', 'FLUX_IVAR_R', 'FLUX_IVAR_Z', 'FIBERFLUX_R', 'FIBERTOTFLUX_R', 'EBV', 'MASKBITS', 'NOBS_G', 'NOBS_R', 'NOBS_Z', 'SHAPE_R', 'TSNR2_BGS', 'ZWARN', 'DELTACHI2', 'WEIGHT','WEIGHT_FKP','MORPHTYPE']
     elif galaxy_type[:3]=="LRG":
-        return ['TARGETID', 'PHOTSYS', 'RA', 'DEC', 'FLUX_G', 'FLUX_R', 'FLUX_Z', 'FLUX_W1', 'FLUX_IVAR_R', 'FLUX_IVAR_Z', 'FLUX_IVAR_W1', 'FIBERFLUX_Z', 'FIBERTOTFLUX_Z', 'EBV', 'MASKBITS', 'NOBS_G', 'NOBS_R', 'NOBS_Z', 'SHAPE_R', 'TSNR2_ELG', 'ZWARN', 'DELTACHI2']
+        return ['TARGETID', 'PHOTSYS', 'RA', 'DEC', 'FLUX_G', 'FLUX_R', 'FLUX_Z', 'FLUX_W1', 'FLUX_IVAR_R', 'FLUX_IVAR_Z', 'FLUX_IVAR_W1', 'FIBERFLUX_Z', 'FIBERTOTFLUX_Z', 'EBV', 'MASKBITS', 'NOBS_G', 'NOBS_R', 'NOBS_Z', 'SHAPE_R', 'TSNR2_ELG', 'ZWARN', 'DELTACHI2', 'WEIGHT', 'WEIGHT_FKP','MORPHTYPE']
+    elif galaxy_type[:3]=="ELG":
+        return ['TARGETID', 'PHOTSYS', 'RA', 'DEC', 'FLUX_G', 'FLUX_R', 'FLUX_Z', 'FLUX_W1','FLUX_W2','FLUX_IVAR_G', 'FLUX_IVAR_R', 'FLUX_IVAR_Z', 'FLUX_IVAR_W1', 'FIBERFLUX_G',  'EBV', 'MASKBITS', 'NOBS_G', 'NOBS_R', 'NOBS_Z', 'SHAPE_R', 'TSNR2_ELG', 'ZWARN', 'o2c', 'WEIGHT', 'WEIGHT_FKP','MORPHTYPE']
+
     else:
         raise NotImplementedError("galaxy_type {} not implemented".format(galaxy_type))
     
@@ -136,7 +140,34 @@ def select_elg(cat):
     mask_elglop &= gmag - rmag < -1.2*(rmag - zmag) + 1.3
 
     return mask_elglop, mask_elgvlo
+    
 
+    
+def select_elg_lopnotqso(cat, field='south'):
+    mask_elglop =  select_elg(cat)[0]
+    
+    if field=='south':
+        southbool = True
+    else:
+        southbool = False
+    
+    isqso = isQSO_randomforest(cat['FLUX_G']*10**(0.4*3.214*cat['EBV']),
+        cat['FLUX_R']*10**(0.4*2.165*cat['EBV']),
+        cat['FLUX_Z']*10**(0.4*1.211*cat['EBV']),
+        cat['MASKBITS'],
+        cat['FLUX_W1']*10**(0.4*0.184*cat['EBV']),
+        cat['FLUX_W2']*10**(0.4*0.113*cat['EBV']),
+        cat['MORPHTYPE'],
+        cat['NOBS_G'],
+        cat['NOBS_R'],
+        cat['NOBS_Z'],
+        np.ones_like(cat['NOBS_Z']).astype('bool'),
+        cat['RA'],
+        cat['DEC'],
+        south=southbool) # I guess south can be either True or False
+    
+    return mask_elglop & ~isqso.astype('bool')
+	
 
 def select_elg_simplified(cat):
 
@@ -402,5 +433,89 @@ def select_lrg_individual_cuts(cat, field='south'):
              & (rmag - w1mag > (w1mag - 16.31) * 1.))
             | (rmag - w1mag > 3.4)
         ),name="double sliding cuts and high-z extension")
+
+    return mask_tab
+
+
+def select_elg_lopnotqso_individual_cuts(cat,field='south'):
+    '''
+    columns = ['OBJID', 'BRICKID', 'RELEASE', 'RA', 'DEC', 'FLUX_G', 'FLUX_R', 'FLUX_Z', 'FIBERFLUX_G', 'FLUX_IVAR_G', 'FLUX_IVAR_R', 'FLUX_IVAR_Z', 'EBV', 'MASKBITS', 'NOBS_G', 'NOBS_R', 'NOBS_Z']
+    fn = '/global/cfs/cdirs/cosmo/data/legacysurvey/dr9/south/sweep/9.0/sweep-000p000-010p005.fits'
+    cat = Table(fitsio.read(fn, columns=columns))
+    mask_elglop, mask_elgvlo = select_elg(cat)
+    '''
+
+    cat = cat.copy()
+    cat.rename_columns(cat.colnames, [ii.upper() for ii in cat.colnames])
+    
+    mask_tab = Table()
+
+
+    mask_quality = np.full(len(cat), True)
+
+    mask_quality &= (cat['FLUX_IVAR_G'] > 0) & (cat['FLUX_G'] > 0) & (cat['FIBERFLUX_G'] > 0)
+    mask_quality &= (cat['FLUX_IVAR_R'] > 0) & (cat['FLUX_R'] > 0)
+    mask_quality &= (cat['FLUX_IVAR_Z'] > 0) & (cat['FLUX_Z'] > 0)
+
+    # ADM observed in every band.
+    mask_quality &= (cat['NOBS_G'] > 0) & (cat['NOBS_R'] > 0) & (cat['NOBS_Z'] > 0)
+
+    # Apply masks
+    maskbits = [1, 12, 13]
+    mask_clean = np.ones(len(cat), dtype=bool)
+    for bit in maskbits:
+        mask_clean &= (cat['MASKBITS'] & 2**bit)==0
+    # print(np.sum(~mask_clean)/len(mask_clean))
+    mask_quality &= mask_clean
+    
+    mask_tab.add_column(mask_quality,name='Quality cuts')
+
+
+    # gmag = 22.5 - 2.5 * np.log10((cat['FLUX_G'] / cat['MW_TRANSMISSION_G']).clip(1e-7))
+    # rmag = 22.5 - 2.5 * np.log10((cat['FLUX_R'] / cat['MW_TRANSMISSION_R']).clip(1e-7))
+    # zmag = 22.5 - 2.5 * np.log10((cat['FLUX_Z'] / cat['MW_TRANSMISSION_Z']).clip(1e-7))
+    # gfibermag = 22.5 - 2.5 * np.log10((cat['FIBERFLUX_G'] / cat['MW_TRANSMISSION_G']).clip(1e-7))
+    gmag = 22.5 - 2.5 * np.log10(np.clip(cat['FLUX_G']*10**(0.4*3.214*cat['EBV']), 1e-7, None))
+    rmag = 22.5 - 2.5 * np.log10(np.clip(cat['FLUX_R']*10**(0.4*2.165*cat['EBV']), 1e-7, None))
+    zmag = 22.5 - 2.5 * np.log10(np.clip(cat['FLUX_Z']*10**(0.4*1.211*cat['EBV']), 1e-7, None))
+    gfibermag = 22.5 - 2.5 * np.log10(np.clip(cat['FIBERFLUX_G']*10**(0.4*3.214*cat['EBV']), 1e-7, None))
+
+    #mask_elglop = mask_quality.copy()
+
+    mask_tab.add_column(gmag > 20, name='bright cut')                       # bright cut.
+    mask_tab.add_column(rmag - zmag > 0.15,name='blue cut')                  # blue cut.
+    mask_tab.add_column(gfibermag < 24.1,name='faint cut')  # faint cut.
+    mask_tab.add_column(gmag - rmag < 0.5*(rmag - zmag) + 0.1,name='remove stars and low-z galaxies')  # remove stars, low-z galaxies.
+
+    #mask_elgvlo = mask_elglop.copy()
+
+    # ADM low-priority OII flux cut.
+    #mask_elgvlo &= gmag - rmag < -1.2*(rmag - zmag) + 1.6
+    #mask_elgvlo &= gmag - rmag >= -1.2*(rmag - zmag) + 1.3
+
+    # ADM high-priority OII flux cut.
+    mask_tab.add_column(gmag - rmag < -1.2*(rmag - zmag) + 1.3, name='high-priority OII flux cut')
+
+    if field=='south':
+        southbool = True
+    else:
+        southbool = False
+    
+    isqso = isQSO_randomforest(cat['FLUX_G']*10**(0.4*3.214*cat['EBV']),
+    cat['FLUX_R']*10**(0.4*2.165*cat['EBV']),
+    cat['FLUX_Z']*10**(0.4*1.211*cat['EBV']),
+    cat['MASKBITS'],
+    cat['FLUX_W1']*10**(0.4*0.184*cat['EBV']),
+    cat['FLUX_W2']*10**(0.4*0.113*cat['EBV']),
+    cat['MORPHTYPE'],
+    cat['NOBS_G'],
+    cat['NOBS_R'],
+    cat['NOBS_Z'],
+    np.ones_like(cat['NOBS_Z']).astype('bool'),
+    cat['RA'],
+    cat['DEC'],
+    south=southbool) # I guess south can be either True or False
+	
+    mask_tab.add_column(~isqso,name='remove quasars')
 
     return mask_tab
