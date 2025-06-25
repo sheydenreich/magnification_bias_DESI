@@ -138,21 +138,21 @@ def apply_lensing(data,  kappa,  galaxy_type, config, verbose=False ):
         for morphtype in morphtypes:
             cat_sel = data_mag['MORPHTYPE'] == morphtype
             if morphtype == 'REX':
-                dat = np.load('/global/cfs/cdirs/desi/users/akrolew/galaxy_fiber_info_files_rongpu/rex.npz')
+                dat = np.load('galaxy_fiber_info_files/rex.npz')
                 fiber_correction[cat_sel] = np.interp(data_mag[cat_sel]['SHAPE_R'], dat['shape_r'], dat['f_factor'])
             elif morphtype == 'DEV':
-                dat = np.load('/global/cfs/cdirs/desi/users/akrolew/galaxy_fiber_info_files_rongpu/dev_fiber_factor.npz')
+                dat = np.load('galaxy_fiber_info_files/dev_fiber_factor.npz')
                 spl = NearestNDInterpolator((dat['shape_r'],dat['q']),dat['f_factor'])
                 fiber_correction[cat_sel] = spl((data_mag[cat_sel]['SHAPE_R'], data_mag[cat_sel]['AXIS_RATIO']))
             elif morphtype == 'EXP':
-                dat = np.load('/global/cfs/cdirs/desi/users/akrolew/galaxy_fiber_info_files_rongpu/exp_fiber_factor.npz')
+                dat = np.load('galaxy_fiber_info_files/exp_fiber_factor.npz')
                 spl = NearestNDInterpolator((dat['shape_r'],dat['q']),dat['f_factor'])
                 fiber_correction[cat_sel] = spl((data_mag[cat_sel]['SHAPE_R'], data_mag[cat_sel]['AXIS_RATIO']))
             elif morphtype == 'SER':
                 #if sersic >= 2.5:
-                dat1 = np.load('/global/cfs/cdirs/desi/users/akrolew/galaxy_fiber_info_files_rongpu/dev_fiber_factor.npz')
+                dat1 = np.load('galaxy_fiber_info_files/dev_fiber_factor.npz')
                 spl1 = NearestNDInterpolator((dat1['shape_r'],dat1['q']),dat1['f_factor'])
-                dat2 = np.load('/global/cfs/cdirs/desi/users/akrolew/galaxy_fiber_info_files_rongpu/exp_fiber_factor.npz')
+                dat2 = np.load('galaxy_fiber_info_files/exp_fiber_factor.npz')
                 spl2 = NearestNDInterpolator((dat2['shape_r'],dat2['q']),dat2['f_factor'])
 
                 fiber_correction[cat_sel & (data_mag['SERSIC'] >= 2.5)] = spl((data_mag[cat_sel & (data_mag['SERSIC'] >= 2.5)]['SHAPE_R'], data_mag['AXIS_RATIO'][cat_sel & (data_mag['SERSIC'] >= 2.5)]))
