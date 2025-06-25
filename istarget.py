@@ -12,7 +12,6 @@ def get_required_columns(galaxy_type):
         return ['TARGETID', 'PHOTSYS', 'RA', 'DEC', 'FLUX_G', 'FLUX_R', 'FLUX_Z', 'FLUX_W1', 'FLUX_IVAR_R', 'FLUX_IVAR_Z', 'FLUX_IVAR_W1', 'FIBERFLUX_Z', 'FIBERTOTFLUX_Z', 'EBV', 'MASKBITS', 'NOBS_G', 'NOBS_R', 'NOBS_Z', 'SHAPE_R', 'TSNR2_ELG', 'ZWARN', 'DELTACHI2', 'WEIGHT', 'WEIGHT_FKP','MORPHTYPE']
     elif galaxy_type[:3]=="ELG":
         return ['TARGETID', 'PHOTSYS', 'RA', 'DEC', 'FLUX_G', 'FLUX_R', 'FLUX_Z', 'FLUX_W1','FLUX_W2','FLUX_IVAR_G', 'FLUX_IVAR_R', 'FLUX_IVAR_Z', 'FLUX_IVAR_W1', 'FIBERFLUX_G',  'EBV', 'MASKBITS', 'NOBS_G', 'NOBS_R', 'NOBS_Z', 'SHAPE_R', 'TSNR2_ELG', 'ZWARN', 'o2c', 'WEIGHT', 'WEIGHT_FKP','MORPHTYPE']
-
     else:
         raise NotImplementedError("galaxy_type {} not implemented".format(galaxy_type))
     
@@ -86,7 +85,7 @@ def select_lrg(cat, field='south'):
     return mask_lrg
 
 
-def select_elg(cat):
+def select_elg(cat, field='south'):
     '''
     columns = ['OBJID', 'BRICKID', 'RELEASE', 'RA', 'DEC', 'FLUX_G', 'FLUX_R', 'FLUX_Z', 'FIBERFLUX_G', 'FLUX_IVAR_G', 'FLUX_IVAR_R', 'FLUX_IVAR_Z', 'EBV', 'MASKBITS', 'NOBS_G', 'NOBS_R', 'NOBS_Z']
     fn = '/global/cfs/cdirs/cosmo/data/legacysurvey/dr9/south/sweep/9.0/sweep-000p000-010p005.fits'
@@ -141,7 +140,6 @@ def select_elg(cat):
 
     return mask_elglop, mask_elgvlo
     
-
     
 def select_elg_lopnotqso(cat, field='south'):
     mask_elglop =  select_elg(cat)[0]
@@ -436,7 +434,6 @@ def select_lrg_individual_cuts(cat, field='south'):
 
     return mask_tab
 
-
 def select_elg_lopnotqso_individual_cuts(cat,field='south'):
     '''
     columns = ['OBJID', 'BRICKID', 'RELEASE', 'RA', 'DEC', 'FLUX_G', 'FLUX_R', 'FLUX_Z', 'FIBERFLUX_G', 'FLUX_IVAR_G', 'FLUX_IVAR_R', 'FLUX_IVAR_Z', 'EBV', 'MASKBITS', 'NOBS_G', 'NOBS_R', 'NOBS_Z']
@@ -447,7 +444,7 @@ def select_elg_lopnotqso_individual_cuts(cat,field='south'):
 
     cat = cat.copy()
     cat.rename_columns(cat.colnames, [ii.upper() for ii in cat.colnames])
-    
+  
     mask_tab = Table()
 
 
@@ -460,27 +457,20 @@ def select_elg_lopnotqso_individual_cuts(cat,field='south'):
     # ADM observed in every band.
     mask_quality &= (cat['NOBS_G'] > 0) & (cat['NOBS_R'] > 0) & (cat['NOBS_Z'] > 0)
 
+
     # Apply masks
     maskbits = [1, 12, 13]
     mask_clean = np.ones(len(cat), dtype=bool)
     for bit in maskbits:
         mask_clean &= (cat['MASKBITS'] & 2**bit)==0
-    # print(np.sum(~mask_clean)/len(mask_clean))
     mask_quality &= mask_clean
     
     mask_tab.add_column(mask_quality,name='Quality cuts')
 
-
-    # gmag = 22.5 - 2.5 * np.log10((cat['FLUX_G'] / cat['MW_TRANSMISSION_G']).clip(1e-7))
-    # rmag = 22.5 - 2.5 * np.log10((cat['FLUX_R'] / cat['MW_TRANSMISSION_R']).clip(1e-7))
-    # zmag = 22.5 - 2.5 * np.log10((cat['FLUX_Z'] / cat['MW_TRANSMISSION_Z']).clip(1e-7))
-    # gfibermag = 22.5 - 2.5 * np.log10((cat['FIBERFLUX_G'] / cat['MW_TRANSMISSION_G']).clip(1e-7))
     gmag = 22.5 - 2.5 * np.log10(np.clip(cat['FLUX_G']*10**(0.4*3.214*cat['EBV']), 1e-7, None))
     rmag = 22.5 - 2.5 * np.log10(np.clip(cat['FLUX_R']*10**(0.4*2.165*cat['EBV']), 1e-7, None))
     zmag = 22.5 - 2.5 * np.log10(np.clip(cat['FLUX_Z']*10**(0.4*1.211*cat['EBV']), 1e-7, None))
     gfibermag = 22.5 - 2.5 * np.log10(np.clip(cat['FIBERFLUX_G']*10**(0.4*3.214*cat['EBV']), 1e-7, None))
-
-    #mask_elglop = mask_quality.copy()
 
     mask_tab.add_column(gmag > 20, name='bright cut')                       # bright cut.
     mask_tab.add_column(rmag - zmag > 0.15,name='blue cut')                  # blue cut.
