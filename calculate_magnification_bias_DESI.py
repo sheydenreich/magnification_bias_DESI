@@ -63,16 +63,16 @@ for galaxy_type in galaxy_types:
         #(cModelMag_new= data_CMASS["cModelMag_EC"], modelMag_new = data_CMASS["modelMag_EC"], fiber2Mag_new= data_CMASS["fiber2Mag_EC"], psfMag_new= data_CMASS["psfMag_EC"], dperp= data_CMASS["dperp"])
 
         #single step size
-        simple_alphas_loc[i],simple_alphas_err_loc[i] = magnification_bias_DESI.calculate_alpha_simple_DESI(galcat, kappa=0.01, galaxy_type=galaxy_type, config=config, weights_str="none")
+        simple_alphas_loc[i],simple_alphas_err_loc[i] = magnification_bias_DESI.calculate_alpha_simple_DESI(galcat, kappa=0.01, galaxy_type=galaxy_type, config=config, weights_str="weight")
         print("alpha_simple = {} +- {}".format(simple_alphas_loc[i],simple_alphas_err_loc[i]))
 
         if(config.getboolean('general','apply_individual_cuts')):
             print("Applying individual cuts")
-            result_dict = magnification_bias_DESI.calculate_alpha_simple_DESI_individual_cuts(galcat, kappa=0.01, galaxy_type=galaxy_type, config=config, weights_str="none")
+            result_dict = magnification_bias_DESI.calculate_alpha_simple_DESI_individual_cuts(galcat, kappa=0.01, galaxy_type=galaxy_type, config=config, weights_str="weight")
             alphas_individual_cuts[f"{galaxy_type}_{i}"] = result_dict
 
         if(do_full_alpha_stepwise_calculation):
-            result = magnification_bias_DESI.calculate_alpha_DESI(galcat, kappas, galaxy_type=galaxy_type, config=config, weights_str="none")
+            result = magnification_bias_DESI.calculate_alpha_DESI(galcat, kappas, galaxy_type=galaxy_type, config=config, weights_str="weight")
             #print(result)
             print("alpha = {} +- {}".format(result["fit"]["alpha_fit"], result["fit"]["alpha_fit_error"]))
             alphas_loc.append(result)
@@ -98,6 +98,9 @@ if(do_full_alpha_stepwise_calculation):
 
     relevant_results = {}
     for galaxy_type in galaxy_types:
+        z_bins = config['general']['zbins_'+galaxy_type].strip().split(',')
+        z_bins = np.array(z_bins,dtype=float)
+
         relevant_results[galaxy_type] = {}
         relevant_results[galaxy_type]['simple_alphas'] = simple_alphas[galaxy_type]
         relevant_results[galaxy_type]['simple_alphas_error'] = simple_alphas[galaxy_type+'_error']

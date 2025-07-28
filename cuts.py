@@ -1,5 +1,9 @@
 import numpy as np
+<<<<<<< ak_changes
+from istarget import select_lrg,select_bgs_bright,select_lrg_individual_cuts,select_bgs_bright_individual_cuts,select_elg_lopnotqso,select_elg_lopnotqso_individual_cuts
+=======
 from istarget import select_lrg,select_bgs_bright,select_lrg_individual_cuts,select_bgs_bright_individual_cuts,select_elg,select_elg_individual_cuts
+>>>>>>> main
 from astropy.table import Table
 
 def get_redshift_bins(galaxy_type):
@@ -7,13 +11,22 @@ def get_redshift_bins(galaxy_type):
         return np.array([0.4,0.6,0.8,1.1])
     elif(galaxy_type=="BGS_BRIGHT"):
         return np.array([0.1,0.2,0.3,0.4])
+<<<<<<< ak_changes
+    elif (galaxy_type=='ELG_LOPnotqso'):
+        return np.array([0.8, 1.1, 1.6])
+=======
     elif(galaxy_type in ["ELG","ELG_LOPnotqso"]):
         return np.array([0.75,1.15,1.55])
+>>>>>>> main
     else:
         raise ValueError("Invalid value of galaxy_type in get_redshift_bins. Allowed: [BGS_BRIGHT,LRG]. Here: {}".format(galaxy_type))
 
 def get_magnitude_cuts(galaxy_type):
+<<<<<<< ak_changes
+    if(galaxy_type in ["LRG","ELG_LOPnotqso"]):
+=======
     if(galaxy_type in ["LRG","ELG","ELG_LOPnotqso"]):
+>>>>>>> main
         return None
     elif(galaxy_type=="BGS_BRIGHT"):
         return -1.*np.array([19.5,20.5,21.0])
@@ -42,6 +55,7 @@ def get_magnitude_mask(data_table,magnitude_cuts,lens_bins,mag_col="ABSMAG01_SDS
 
 def apply_magnitude_cuts(data_table,galaxy_type,config,mag_col="ABSMAG01_SDSS_R",zcol="Z"):
     magnitude_cuts = config.get('general',f'absmag_cuts_{galaxy_type}',fallback=None)
+    print(magnitude_cuts)
     if magnitude_cuts is not None:
         magnitude_cuts = -1.*np.array([abs(float(x)) for x in magnitude_cuts.split(',')])
     lens_bins = np.array([float(x) for x in config['general']['zbins_'+galaxy_type].split(',')])
@@ -63,8 +77,12 @@ def select_good_redshifts(data_table, galaxy_type, zcol="Z"):
         mask = ((data_table["ZWARN"] == 0) & (data_table["DELTACHI2"] > 40))
     elif(galaxy_type=="LRG"):
         mask = ((data_table["ZWARN"] == 0) & (data_table["DELTACHI2"] > 15) & (data_table[zcol] < 1.5))
+<<<<<<< ak_changes
+    elif(galaxy_type=="ELG_LOPnotqso"):
+=======
     elif(galaxy_type in ["ELG","ELG_LOPnotqso"]):
         # print(np.unique(data_table["ZWARN"]))
+>>>>>>> main
         mask = ((data_table["ZWARN"] < 99) & (data_table["o2c"] > 0.9))
     else:
         raise ValueError("Invalid value of galaxy_type in select_good_redshifts. Allowed: [BGS,BGS_BRIGHT,LRG,ELG]. Here: {}".format(galaxy_type))
@@ -75,8 +93,13 @@ def apply_photocuts_DESI(data, galaxy_type):
         selection_fnc = select_lrg
     elif galaxy_type == "BGS_BRIGHT":
         selection_fnc = select_bgs_bright
+<<<<<<< ak_changes
+    elif galaxy_type == "ELG_LOPnotqso":
+        selection_fnc = select_elg_lopnotqso
+=======
     elif galaxy_type in ["ELG","ELG_LOPnotqso"]:
         selection_fnc = select_elg
+>>>>>>> main
     else:
         raise ValueError(f"galaxy_type {galaxy_type} not recognized")
     # split into north and south region, as selection function is different
@@ -100,8 +123,13 @@ def apply_photocuts_DESI_individual_cuts(data, galaxy_type):
         selection_fnc = select_lrg_individual_cuts
     elif galaxy_type == "BGS_BRIGHT":
         selection_fnc = select_bgs_bright_individual_cuts
+<<<<<<< ak_changes
+    elif galaxy_type == 'ELG_LOPnotqso':
+        selection_fnc = select_elg_lopnotqso_individual_cuts
+=======
     elif galaxy_type in ["ELG","ELG_LOPnotqso"]:
         selection_fnc = select_elg_individual_cuts
+>>>>>>> main
     else:
         raise ValueError(f"galaxy_type {galaxy_type} not recognized")
     # split into north and south region, as selection function is different

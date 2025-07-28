@@ -1,7 +1,7 @@
 import os
 import numpy as np
 import healpy as hp
-from astropy.table import Table, join
+from astropy.table import Table, join, vstack, Column
 from astropy.io import fits
 import re
 
@@ -117,7 +117,7 @@ def cut_to_unique_TARGETID(table):
 
     return unique_table
 
-def read_table(filename, columns=None, memmap=True):
+def read_table(filename, columns=None, memmap=True, tabulatedbool=False):
     if columns is None:
         return Table.read(filename)
     requests = {}
@@ -141,7 +141,12 @@ def read_table(filename, columns=None, memmap=True):
         if "_clustering" in os.path.basename(filename):
             # first priority try to read from full_HPmapcut file
             print("Trying to match from full_HPmapcut file")
-            tab_full_HPmapcut = read_table(filename.replace("_clustering","_full_HPmapcut"),columns=["TARGETID"]+not_available_columns,memmap=memmap)
+            not_available_columns = list(set(not_available_columns)-set(['WEIGHT_FKP']))
+            if "DA2" in filename:
+                tab_full_HPmapcut = read_table(filename.replace("_clustering","_full_HPmapcut").replace("nonKP",""),columns=["TARGETID"]+not_available_columns,memmap=memmap)
+            else:
+                tab_full_HPmapcut = read_table(filename.replace("_clustering","_full_HPmapcut"),columns=["TARGETID"]+not_available_columns,memmap=memmap)
+
             if len(np.unique(tab_full_HPmapcut["TARGETID"]))!=len(tab_full_HPmapcut["TARGETID"]):
                 print("WARNING: TARGETID not unique in full_HPmapcut file: {} vs {}".format(np.unique(len(tab_full_HPmapcut["TARGETID"])),len(tab_full_HPmapcut["TARGETID"])))
                 tab_full_HPmapcut = cut_to_unique_TARGETID(tab_full_HPmapcut)
@@ -150,17 +155,58 @@ def read_table(filename, columns=None, memmap=True):
             data = join(data,tab_full_HPmapcut,keys="TARGETID",join_type="inner")
             len_after = len(data)
             assert len_before==len_after, f"Length mismatch: {len_before} vs {len_after}, full_HPmapcut file {len(tab_full_HPmapcut)}"
+            print("Matching weights from clustering_NGC and clustering_SGC")
+            #tab_NGC = Table(fits.open(filename.replace("_clustering","_NGC_clustering"),columns=['TARGETID','WEIGHT_FKP'])[1].data)
+            #tab_SGC = Table(fits.open(filename.replace("_clustering","_SGC_clustering"),columns=['TARGETID','WEIGHT_FKP'])[1].data)
+            hdul = fits.open(filename.replace("_clustering","_NGC_clustering"),memmap=True)
+            tab_NGC = hdul_to_table(hdul,columns=['TARGETID','WEIGHT_FKP'])
+            hdul = fits.open(filename.replace("_clustering","_SGC_clustering"),memmap=True)
+            tab_SGC = hdul_to_table(hdul,columns=['TARGETID','WEIGHT_FKP'])
+
+            tab_with_weights = vstack((tab_NGC, tab_SGC))
+            data = join(data, tab_with_weights, keys="TARGETID",join_type="inner")
+            
+            if tabulatedbool:
+                axis_ratio = np.zeros(len(data['RA']))
+                sersic = np.zeros(len(data['RA']))
+                gaia_gmag = np.zeros(len(data['RA']))
+                pix = hp.ang2pix(8,data['RA'],data['DEC'],lonlat=True,nest=True)
+                for ppix in np.unique(pix):
+                    #ppix = np.unique(pix)[0]
+                    sel = np.where(pix == ppix)
+                    if "BGS" in os.path.basename(filename):
+                        targ = fits.open('/global/cfs/cdirs/desi/target/catalogs/dr9/1.1.1/targets/main/resolve/bright/targets-bright-hp-%i.fits' % ppix)[1].data
+                    else:
+                        targ = fits.open('/global/cfs/cdirs/desi/target/catalogs/dr9/1.1.1/targets/main/resolve/dark/targets-dark-hp-%i.fits' % ppix)[1].data
+                    joined_cat = join(data[sel], targ, keys='TARGETID')
+                    ellipticity = (joined_cat['SHAPE_E1']**2 + joined_cat['SHAPE_E2']**2)**0.5
+                    axis_ratio[sel] = (1 + ellipticity) / (1 - ellipticity)
+                    sersic[sel] = joined_cat['SERSIC']
+                    gaia_gmag[sel] = joined_cat['GAIA_PHOT_G_MEAN_MAG']
+                    print(ppix)
+                c1 = Column(axis_ratio, name='AXIS_RATIO')
+                c2 = Column(sersic, name='SERSIC')
+                c3 = Column(gaia_gmag,name='GAIA_GMAG')
+                data.add_column(c1, index=0)
+                data.add_column(c2, index=0)
+                data.add_column(c3, index=0)
+
         else:
             # assign via assign_systematic_property function
-            print(f"Assigning {not_available_columns} from healpix maps")
-            galaxy_type = os.path.basename(filename).split("_")[0]
-            if galaxy_type == "BGS":
-                galaxy_type = "BGS_BRIGHT"
-            version = filename.split("/v1.")[1]
-            version = version.split("/")[0]
-            version = Version("v1."+version)
-            for col in not_available_columns:
-                data[col] = assign_systematic_property(data,galaxy_type,col,version)
+            if "WEIGHT" in not_available_columns:
+                pass
+            else:
+                print(f"Assigning {not_available_columns} from healpix maps")
+                galaxy_type = os.path.basename(filename).split("_")[0]
+                if galaxy_type == 'ELG':
+                    galaxy_type = 'ELG_LOPnotqso'
+                if galaxy_type == "BGS":
+                    galaxy_type = "BGS_BRIGHT"
+                version = filename.split("/v1.")[1]
+                version = version.split("/")[0]
+                version = Version("v1."+version)
+                for col in not_available_columns:
+                    data[col] = assign_systematic_property(data,galaxy_type,col,version)
     assert not is_table_masked(data), f"Table {filename} is masked"
     # remove all columns that were requested
     for key in requests.keys():
