@@ -112,14 +112,8 @@ def apply_lensing(data,  kappa,  galaxy_type, config, verbose=False ):
     elif(galaxy_type == "BGS_BRIGHT"):
         fiber_column = "FIBERFLUX_R"
         fiber_tot_column = "FIBERTOTFLUX_R"
-<<<<<<< ak_changes
     elif(galaxy_type == 'ELG_LOPnotqso'):
         fiber_column = "FIBERFLUX_G"
-=======
-    elif(galaxy_type == "ELG_LOPnotqso"):
-        fiber_column = "FIBERFLUX_G"
-        fiber_tot_column = "FIBERTOTFLUX_G"
->>>>>>> main
     else:
         raise ValueError(f"galaxy_type {galaxy_type} not recognized")
     
